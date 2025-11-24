@@ -11,12 +11,12 @@ def and-then [next: closure --else: closure] {
 }
 
 # ============================================================================
-# CSRF State Management (Security Fix)
+# CSRF State Management
 # ============================================================================
 
-# Generate cryptographically secure random state token
+# Generate random state token using UUIDv4
 export def generate-state [return_to: string] {
-  let token = random chars --length 32
+  let token = random uuid
   let state_data = {
     token: $token
     return_to: $return_to
@@ -235,7 +235,7 @@ export def handle-oauth-callback [
 
 # Handle logout
 export def handle-logout [client: record] {
-  let cookies = $"" | get cookie? | parse-cookies  # Get from request
+  let cookies = $"" | get cookie? | parse-cookies
   let session_hash = $cookies | get -i session
 
   if ($session_hash | is-not-empty) {
