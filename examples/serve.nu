@@ -1,14 +1,18 @@
 use ../lib.nu *
 use ../providers
 
+# Clear debug log on startup
+rm -f /tmp/session-debug.log
+
 def load-client [provider_name: string] {
   let config = $env.OAUTH_CONFIG | from json
   let provider_config = $config.providers | get $provider_name
 
-  let sessions_dir = pwd | collect | path join "sessions"
+  let base_dir = $env.PWD
+  let sessions_dir = $base_dir | path join "sessions"
   mkdir $sessions_dir
 
-  let states_dir = pwd | collect | path join "states"
+  let states_dir = $base_dir | path join "states"
   mkdir $states_dir
 
   {
@@ -106,13 +110,20 @@ def render-user-info [auth: record] {
       }
 
       # Load state to get provider name
-      let sessions_dir = pwd | collect | path join "sessions"
-      let states_dir = pwd | collect | path join "states"
+      let base_dir = $env.PWD
+      let sessions_dir = $base_dir | path join "sessions"
+      let states_dir = $base_dir | path join "states"
       let temp_client = {
         states: (make-session-store $states_dir)
       }
 
-      let stored_state = do $temp_client.states.get $state_hash | from json
+      let state_data = do $temp_client.states.get $state_hash
+      if ($state_data | is-empty) {
+        .response {status: 400}
+        return "Error: Invalid or expired state"
+      }
+
+      let stored_state = $state_data | from json
       let provider_name = $stored_state.provider_name
 
       # Now load proper client and provider

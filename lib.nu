@@ -95,19 +95,24 @@ export def clear-cookie [
 # Session Storage
 # ============================================================================
 
+# Helper to get storage path - called from within closures
+def get-storage-path [base_dir: string, hash: string] {
+  $base_dir | path join $hash
+}
+
 # Create session store with filesystem backend
 export def make-session-store [sessions_dir: string] {
   return {
     set: {||
       let content = $in
-      let hash = $in | hash sha256
-      let path = ($sessions_dir | path join $hash)
-      $in | save $path
+      let hash = $content | hash sha256
+      let path = get-storage-path $sessions_dir $hash
+      $content | save -f $path
       $hash
     }
 
     get: {|hash|
-      let path = ($sessions_dir | path join $hash)
+      let path = get-storage-path $sessions_dir $hash
       if ($path | path exists) {
         open $path
       }
@@ -115,14 +120,14 @@ export def make-session-store [sessions_dir: string] {
 
     update: {|hash|
       let content = $in
-      let path = ($sessions_dir | path join $hash)
+      let path = get-storage-path $sessions_dir $hash
       if ($path | path exists) {
         $content | save -f $path
       }
     }
 
     delete: {|hash|
-      let path = ($sessions_dir | path join $hash)
+      let path = get-storage-path $sessions_dir $hash
       if ($path | path exists) {
         rm $path
       }
@@ -246,6 +251,9 @@ export def handle-oauth-callback [
   # Exchange code for token
   let token_resp = do $provider.token-exchange $client $req.query.code
 
+  # Debug: save token response
+  $token_resp | to json | save -f /tmp/oauth-token-response.json
+
   if $token_resp.status >= 399 {
     .response {status: 400}
     return $"Error: Failed to get token (($token_resp.status))"
@@ -254,6 +262,10 @@ export def handle-oauth-callback [
   # Get user info
   # For Google, pass id_token if available (for JWT decoding), otherwise access_token
   let user_token = $token_resp.body.id_token? | default $token_resp.body.access_token
+
+  # Debug: save user token
+  $user_token | save -f /tmp/oauth-user-token.txt
+
   let user_resp = do $provider.get-user $user_token
 
   if $user_resp.status >= 399 {
@@ -266,13 +278,24 @@ export def handle-oauth-callback [
     | insert token_issued_at (date now | format date "%Y-%m-%dT%H:%M:%S%.3fZ")
     | insert user $user_resp.body
     | insert provider $stored_state.provider_name
+
+  # Debug: save session data before storing
+  $"SESSION DATA: ($session_data | to json -r)\n" | save -a /tmp/session-debug.log
+
   let session_hash = $session_data | to json -r | do $client.sessions.set
+
+  # Debug: log session hash
+  $"SESSION HASH: ($session_hash)\n" | save -a /tmp/session-debug.log
+
+  # Set session cookie and clear oauth_state cookie
+  let set_session = set-cookie $client.redirect "session" $session_hash
+  let clear_state = clear-cookie $client.redirect "oauth_state"
 
   .response {
     status: 302
     headers: {
       Location: $stored_state.return_to
-      "Set-Cookie": (set-cookie $client.redirect "session" $session_hash)
+      "Set-Cookie": [$set_session, $clear_state]
     }
   }
 }
@@ -282,15 +305,23 @@ export def handle-logout [client: record, req: record] {
   let cookies = $req.headers | get cookie? | parse-cookies
   let session_hash = $cookies | get -i session
 
+  $"LOGOUT: session_hash = ($session_hash)\n" | save -a /tmp/session-debug.log
+
   if ($session_hash | is-not-empty) {
+    $"LOGOUT: calling delete for ($session_hash)\n" | save -a /tmp/session-debug.log
     do $client.sessions.delete $session_hash
+    $"LOGOUT: delete called\n" | save -a /tmp/session-debug.log
   }
+
+  # Clear both session and state cookies using list syntax for multiple Set-Cookie headers
+  let clear_session = clear-cookie $client.redirect "session"
+  let clear_state = clear-cookie $client.redirect "oauth_state"
 
   .response {
     status: 302
     headers: {
       Location: "/"
-      "Set-Cookie": (clear-cookie $client.redirect "session")
+      "Set-Cookie": [$clear_session, $clear_state]
     }
   }
 }
