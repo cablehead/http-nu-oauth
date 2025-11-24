@@ -1,3 +1,4 @@
 examples/*/sessions/
 examples/*/states/
 examples/*/.env
+examples/config.json

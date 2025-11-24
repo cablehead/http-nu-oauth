@@ -7,7 +7,7 @@
       "scopes": ["identify"]
     },
     "google": {
-      "client_id": "your_google_client_id",
+      "client_id": "your_google_client_id.apps.googleusercontent.com",
       "client_secret": "your_google_client_secret",
       "scopes": ["openid", "email"]
     }

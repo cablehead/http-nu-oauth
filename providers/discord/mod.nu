@@ -39,5 +39,18 @@ export def provider [] {
       let url = "https://discord.com/api/users/@me"
       http get --full --allow-errors --headers [Authorization $"Bearer ($access_token)"] $url
     }
+
+    # Refresh access token using refresh token
+    token-refresh: {|client: record refresh_token: string|
+      let token_url = "https://discord.com/api/oauth2/token"
+      let params = {
+        client_id: $client.id
+        client_secret: $client.secret
+        grant_type: "refresh_token"
+        refresh_token: $refresh_token
+      }
+
+      http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
+    }
   }
 }

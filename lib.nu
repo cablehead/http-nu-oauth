@@ -113,6 +113,14 @@ export def make-session-store [sessions_dir: string] {
       }
     }
 
+    update: {|hash|
+      let content = $in
+      let path = ($sessions_dir | path join $hash)
+      if ($path | path exists) {
+        $content | save -f $path
+      }
+    }
+
     delete: {|hash|
       let path = ($sessions_dir | path join $hash)
       if ($path | path exists) {
@@ -127,15 +135,49 @@ export def make-session-store [sessions_dir: string] {
 # ============================================================================
 
 # Get authenticated user from session
-export def get-auth [client req] {
+export def get-auth [client req providers: record] {
   let cookies = $req.headers | get cookie? | parse-cookies
-  $cookies | and-then {
-    get session? | and-then {
-      do $client.sessions.get $in | and-then {
-        from json
+  let session_hash = $cookies | get session?
+  let session = $session_hash | and-then {
+    do $client.sessions.get $in | and-then {
+      from json
+    }
+  }
+
+  # Check if token is expired
+  if ($session | is-not-empty) {
+    let expires_in = $session.expires_in?
+    if ($expires_in | is-not-empty) {
+      let issued_at = $session.token_issued_at | into datetime
+      let expires_at = $issued_at + ($expires_in * 1sec)
+      let now = date now
+      if $now >= $expires_at {
+        # Try to refresh token
+        let refresh_token = $session.refresh_token?
+        if ($refresh_token | is-not-empty) {
+          let provider = $providers | get ($session.provider)
+          let token_refresh = $provider.token-refresh?
+          if ($token_refresh | is-not-empty) {
+            let token_resp = do $token_refresh $client $refresh_token
+            if $token_resp.status < 399 {
+              # Update session with refreshed token
+              let updated_session = $token_resp.body
+                | insert token_issued_at (date now | format date "%Y-%m-%dT%H:%M:%S%.3fZ")
+                | insert user $session.user
+                | insert provider $session.provider
+              $updated_session | to json -r | do $client.sessions.update $session_hash
+              return $updated_session
+            }
+          }
+        }
+        # Token expired and couldn't refresh - delete session
+        do $client.sessions.delete $session_hash
+        return null
       }
     }
   }
+
+  $session
 }
 
 # Build authorization URL
@@ -210,7 +252,9 @@ export def handle-oauth-callback [
   }
 
   # Get user info
-  let user_resp = do $provider.get-user $token_resp.body.access_token
+  # For Google, pass id_token if available (for JWT decoding), otherwise access_token
+  let user_token = $token_resp.body.id_token? | default $token_resp.body.access_token
+  let user_resp = do $provider.get-user $user_token
 
   if $user_resp.status >= 399 {
     .response {status: 400}
@@ -218,11 +262,10 @@ export def handle-oauth-callback [
   }
 
   # Store session
-  let session_data = {
-    access_token: $token_resp.body.access_token
-    user: $user_resp.body
-    provider: $stored_state.provider_name
-  }
+  let session_data = $token_resp.body
+    | insert token_issued_at (date now | format date "%Y-%m-%dT%H:%M:%S%.3fZ")
+    | insert user $user_resp.body
+    | insert provider $stored_state.provider_name
   let session_hash = $session_data | to json -r | do $client.sessions.set
 
   .response {
@@ -235,8 +278,8 @@ export def handle-oauth-callback [
 }
 
 # Handle logout
-export def handle-logout [client: record] {
-  let cookies = $"" | get cookie? | parse-cookies
+export def handle-logout [client: record, req: record] {
+  let cookies = $req.headers | get cookie? | parse-cookies
   let session_hash = $cookies | get -i session
 
   if ($session_hash | is-not-empty) {

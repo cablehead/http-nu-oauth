@@ -2,10 +2,17 @@
 
 Provider-agnostic OAuth 2.0 for Nushell with [http-nu](https://github.com/cablehead/http-nu).
 
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/8bab337e-cdcc-4731-aa58-908ae3f35f86"
+         width="500"
+         controls>
+  </video>
+</div>
+
 ## Structure
 
 ```
-oauth/
+http-nu-oauth/
 ├─ lib.nu                    # Common OAuth logic
 ├─ providers/
 │  ├─ mod.nu                 # Provider registry
@@ -19,12 +26,12 @@ oauth/
 
 ## Quick Start
 
-```bash
-cd oauth/examples
+```nushell
+cd http-nu-oauth/examples
 cp config.example.json config.json
 # Edit config.json with credentials
-export OAUTH_CONFIG=config.json
-nu -c "cat serve.nu | http-nu :8080 -"
+$env.OAUTH_CONFIG = open config.json | to json
+cat serve.nu | http-nu :8080 -
 ```
 
 ## Provider Interface
@@ -34,37 +41,26 @@ nu -c "cat serve.nu | http-nu :8080 -"
   auth-url: {|client: record state: string| string }
   token-exchange: {|client: record code: string| record }
   get-user: {|access_token: string| record }
+  token-refresh?: {|client: record refresh_token: string| record }  # Optional
   verify-token?: {|token: string| record }  # Optional
-}
-```
-
-## Client Configuration
-
-```nushell
-{
-  provider_name: "discord"
-  id: string                # Client ID
-  secret: string            # Client secret
-  redirect: string          # Redirect URI
-  scopes: list<string>      # OAuth scopes
-  sessions: record          # Session store
-  states: record            # State store
 }
 ```
 
 ## API
 
-- `oauth get-auth` - Get authenticated user from session
-- `oauth handle-oauth` - Initiate OAuth flow
-- `oauth handle-oauth-callback` - Process OAuth callback
-- `oauth handle-logout` - Clear session
-- `oauth generate-state` - Generate CSRF state token
-- `oauth validate-state` - Validate state token
+- `get-auth` - Get authenticated user from session
+- `handle-oauth` - Initiate OAuth flow
+- `handle-oauth-callback` - Process OAuth callback
+- `handle-logout` - Clear session
+- `generate-state` - Generate CSRF state token
+- `validate-state` - Validate state token
 
 ## Security Features
 
 - CSRF protection with random state validation
 - State tokens expire after 5 minutes and are single-use
+- Access tokens respect provider TTL and expire automatically
+- Automatic token refresh using refresh_token when available
 - Session identifiers use SHA256 hashing
 - Cookies: HttpOnly, SameSite=Lax, Secure (HTTPS)
 - PKCE not implemented (planned)

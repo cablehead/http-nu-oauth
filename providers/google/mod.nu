@@ -68,5 +68,18 @@ export def provider [] {
       } | url join
       http get --full --allow-errors $url
     }
+
+    # Refresh access token using refresh token
+    token-refresh: {|client: record refresh_token: string|
+      let token_url = "https://oauth2.googleapis.com/token"
+      let params = {
+        client_id: $client.id
+        client_secret: $client.secret
+        grant_type: "refresh_token"
+        refresh_token: $refresh_token
+      }
+
+      http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
+    }
   }
 }
