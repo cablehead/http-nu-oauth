@@ -1,0 +1,15 @@
+{
+  "redirect_uri": "http://localhost:8080/auth/callback",
+  "providers": {
+    "discord": {
+      "client_id": "your_discord_client_id",
+      "client_secret": "your_discord_client_secret",
+      "scopes": ["identify", "email"]
+    },
+    "google": {
+      "client_id": "your_google_client_id",
+      "client_secret": "your_google_client_secret",
+      "scopes": ["openid", "email", "profile"]
+    }
+  }
+}

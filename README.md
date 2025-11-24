@@ -12,22 +12,23 @@ oauth/
 │  ├─ discord/mod.nu         # Discord OAuth
 │  └─ google/mod.nu          # Google OAuth
 └─ examples/
-   ├─ discord-app/
-   └─ google-app/
+   ├─ discord-app/         # Single provider (Discord)
+   ├─ google-app/          # Single provider (Google)
+   └─ multi-provider/      # Multiple providers in one app
 ```
 
 ## Quick Start
 
-**Discord:**
+**Multi-Provider (Recommended):**
 ```bash
-cd oauth/examples/discord-app
-cp .env.example .env
-# Edit .env with credentials from https://discord.com/developers/applications
-# Leave "Public Client" unchecked, add redirect: http://localhost:8080/auth/callback
-nu -c "with-env (open .env | lines | where {\$in | str contains '='} | parse '{key}={value}' | transpose -r | into record) { cat serve.nu | http-nu :8080 - }"
+cd oauth/examples/multi-provider
+cp config.example.json config.json
+# Edit config.json with credentials
+export OAUTH_CONFIG=config.json
+nu -c "cat serve.nu | http-nu :8080 -"
 ```
 
-**Google:** Same steps, use `oauth/examples/google-app` and https://console.cloud.google.com/apis/credentials
+**Single Provider:** See `examples/discord-app` or `examples/google-app`
 
 ## Provider Interface
 

@@ -15,11 +15,12 @@ def and-then [next: closure --else: closure] {
 # ============================================================================
 
 # Generate random state token using UUIDv4
-export def generate-state [return_to: string] {
+export def generate-state [return_to: string, provider_name: string] {
   let token = random uuid
   let state_data = {
     token: $token
     return_to: $return_to
+    provider_name: $provider_name
     created_at: (date now | format date "%Y-%m-%dT%H:%M:%S%.3fZ")
   }
   {
@@ -153,7 +154,7 @@ export def handle-oauth [
   return_to: string
 ] {
   # Generate CSRF state
-  let state_info = generate-state $return_to
+  let state_info = generate-state $return_to $client.provider_name
   let state_hash = $state_info.data | to json -r | do $client.states.set
 
   # Build auth URL with state token
@@ -220,7 +221,7 @@ export def handle-oauth-callback [
   let session_data = {
     access_token: $token_resp.body.access_token
     user: $user_resp.body
-    provider: $client.provider_name
+    provider: $stored_state.provider_name
   }
   let session_hash = $session_data | to json -r | do $client.sessions.set
 
