@@ -1,0 +1,72 @@
+# Google OAuth Provider
+# Implements Google OAuth 2.0 flow with JWT support
+
+# Decode Google JWT ID token
+def decode-jwt []: string -> record {
+  let $token = $in
+  let parts = $token | split row "."
+  {
+    h: ($parts.0 | decode base64 --nopad | decode)
+    p: ($parts.1 | decode base64 --nopad | decode | from json)
+    sig: $parts.2
+  }
+}
+
+export def provider [] {
+  {
+    # Build Google authorization URL
+    auth-url: {|client: record state: string|
+      let auth_url = {
+        scheme: "https"
+        host: "accounts.google.com"
+        path: "/o/oauth2/v2/auth"
+        params: {
+          client_id: $client.id
+          redirect_uri: $client.redirect
+          response_type: "code"
+          scope: ($client.scopes | str join " ")
+          state: $state
+        }
+      } | url join
+      $auth_url
+    }
+
+    # Exchange authorization code for access token
+    token-exchange: {|client: record code: string|
+      let token_url = "https://oauth2.googleapis.com/token"
+      let params = {
+        client_id: $client.id
+        client_secret: $client.secret
+        code: $code
+        redirect_uri: $client.redirect
+        grant_type: "authorization_code"
+      }
+
+      http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
+    }
+
+    # Get user info from Google (decode JWT id_token)
+    get-user: {|access_token: string|
+      # For Google, we decode the JWT to get user info
+      # In practice, this would be called with the id_token from token_resp.body.id_token
+      # We'll return a synthetic response that mimics the http response format
+      {
+        status: 200
+        body: ($access_token | decode-jwt | get p)
+      }
+    }
+
+    # Optional: Verify token with Google's tokeninfo endpoint
+    verify-token: {|id_token: string|
+      let url = {
+        scheme: "https"
+        host: "oauth2.googleapis.com"
+        path: "tokeninfo"
+        params: {
+          id_token: $id_token
+        }
+      } | url join
+      http get --full --allow-errors $url
+    }
+  }
+}
