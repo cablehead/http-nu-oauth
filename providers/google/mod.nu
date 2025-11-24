@@ -5,9 +5,11 @@
 def decode-jwt []: string -> record {
   let $token = $in
   let parts = $token | split row "."
+
+  # JWT uses base64url encoding without padding
   {
-    h: ($parts.0 | decode base64 --nopad | decode)
-    p: ($parts.1 | decode base64 --nopad | decode | from json)
+    h: ($parts.0 | decode base64 --url --nopad | decode)
+    p: ($parts.1 | decode base64 --url --nopad | decode | from json)
     sig: $parts.2
   }
 }
