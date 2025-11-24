@@ -12,23 +12,20 @@ oauth/
 │  ├─ discord/mod.nu         # Discord OAuth
 │  └─ google/mod.nu          # Google OAuth
 └─ examples/
-   ├─ discord-app/         # Single provider (Discord)
-   ├─ google-app/          # Single provider (Google)
-   └─ multi-provider/      # Multiple providers in one app
+   ├─ config.example.json
+   ├─ serve.nu
+   └─ README.md
 ```
 
 ## Quick Start
 
-**Multi-Provider (Recommended):**
 ```bash
-cd oauth/examples/multi-provider
+cd oauth/examples
 cp config.example.json config.json
 # Edit config.json with credentials
 export OAUTH_CONFIG=config.json
 nu -c "cat serve.nu | http-nu :8080 -"
 ```
-
-**Single Provider:** See `examples/discord-app` or `examples/google-app`
 
 ## Provider Interface
 
@@ -76,7 +73,7 @@ nu -c "cat serve.nu | http-nu :8080 -"
 
 1. Create `providers/your-provider/mod.nu` implementing the interface
 2. Register in `providers/mod.nu`
-3. Add example in `examples/`
+3. Add to `examples/config.example.json`
 
 ## Dependencies
 
