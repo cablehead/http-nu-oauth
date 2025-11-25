@@ -42,7 +42,8 @@ export def validate-state [state_token: string, stored_states: list] {
   let now = date now
   let age = ($now - $created) | into int
 
-  if $age > 300_000_000_000 {  # 5 minutes in nanoseconds
+  if $age > 300_000_000_000 {
+    # 5 minutes in nanoseconds
     return null
   }
 
@@ -156,9 +157,9 @@ export def get-auth [client req providers: record] {
             if $token_resp.status < 399 {
               # Update session with refreshed token
               let updated_session = $token_resp.body
-                | insert token_issued_at (date now)
-                | insert user $session.user
-                | insert provider $session.provider
+              | insert token_issued_at (date now)
+              | insert user $session.user
+              | insert provider $session.provider
               $updated_session | to json -r | do $client.sessions.update $session_hash
               return $updated_session
             }
@@ -257,9 +258,9 @@ export def handle-oauth-callback [
 
   # Store session
   let session_data = $token_resp.body
-    | insert token_issued_at (date now)
-    | insert user $user_resp.body
-    | insert provider $stored_state.provider_name
+  | insert token_issued_at (date now)
+  | insert user $user_resp.body
+  | insert provider $stored_state.provider_name
 
   let session_hash = $session_data | to json -r | do $client.sessions.set
 
@@ -271,7 +272,7 @@ export def handle-oauth-callback [
     status: 302
     headers: {
       Location: $stored_state.return_to
-      "Set-Cookie": [$set_session, $clear_state]
+      "Set-Cookie": [$set_session $clear_state]
     }
   }
 }
@@ -293,7 +294,7 @@ export def handle-logout [client: record, req: record] {
     status: 302
     headers: {
       Location: "/"
-      "Set-Cookie": [$clear_session, $clear_state]
+      "Set-Cookie": [$clear_session $clear_state]
     }
   }
 }

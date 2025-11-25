@@ -75,21 +75,21 @@ def render-user-info [auth: record] {
 
 {|req|
   match $req {
-    {method: "GET", path: "/auth/logout"} => {
+    {method: "GET" , path: "/auth/logout"} => {
       let config = $env.OAUTH_CONFIG | from json
       let first_provider = $config.providers | columns | first
       let client = load-client $first_provider
       return (handle-logout $client $req)
     }
 
-    {method: "GET", path: $path} if ($path | str starts-with "/auth/login/") => {
+    {method: "GET" , path: $path} if ($path | str starts-with "/auth/login/") => {
       let provider_name = $path | str replace "/auth/login/" ""
       let client = load-client $provider_name
       let provider = providers all | get $provider_name
       return (handle-oauth $provider $client "/")
     }
 
-    {method: "GET", path: "/auth/callback"} => {
+    {method: "GET" , path: "/auth/callback"} => {
       # Get provider name from state cookie
       let cookies = $req.headers | get cookie? | parse-cookies
       let state_hash = $cookies | get -o oauth_state
@@ -119,7 +119,7 @@ def render-user-info [auth: record] {
       return (handle-oauth-callback $provider $client $req)
     }
 
-    {method: "GET", path: "/"} => {
+    {method: "GET" , path: "/"} => {
       let config = $env.OAUTH_CONFIG | from json
       let first_provider = $config.providers | columns | first
       let client = load-client $first_provider
