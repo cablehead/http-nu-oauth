@@ -44,9 +44,7 @@ export def provider [] {
         grant_type: "authorization_code"
       }
 
-      let response = http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
-      $response | to json | save -f /tmp/google-token-response.json
-      $response
+      http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
     }
 
     # Get user info from Google (decode JWT id_token)

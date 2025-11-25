@@ -1,9 +1,6 @@
 use ../lib.nu *
 use ../providers
 
-# Clear debug log on startup
-rm -f /tmp/session-debug.log
-
 def load-client [provider_name: string] {
   let config = $env.OAUTH_CONFIG | from json
   let provider_config = $config.providers | get $provider_name

@@ -107,17 +107,12 @@ export def make-session-store [sessions_dir: string] {
       let content = $in
       let hash = $content | hash sha256
       let path = get-storage-path $sessions_dir $hash
-      $"SET: sessions_dir=($sessions_dir) path=($path)\n" | save -a /tmp/session-debug.log
       $content | save -f $path
-      $"SET: save completed for ($hash)\n" | save -a /tmp/session-debug.log
-      $"SET: ls sessions_dir: (ls $sessions_dir | to nuon)\n" | save -a /tmp/session-debug.log
       $hash
     }
 
     get: {|hash|
       let path = get-storage-path $sessions_dir $hash
-      $"GET: sessions_dir=($sessions_dir) path=($path) exists=(($path | path exists))\n" | save -a /tmp/session-debug.log
-      $"GET: ls sessions_dir: (ls $sessions_dir | to nuon)\n" | save -a /tmp/session-debug.log
       if ($path | path exists) {
         open $path
       }
@@ -133,7 +128,6 @@ export def make-session-store [sessions_dir: string] {
 
     delete: {|hash|
       let path = get-storage-path $sessions_dir $hash
-      $"DELETE: sessions_dir=($sessions_dir) path=($path) exists=(($path | path exists))\n" | save -a /tmp/session-debug.log
       if ($path | path exists) {
         rm $path
       }
@@ -162,7 +156,6 @@ export def get-auth [client req providers: record] {
       let issued_at = $session.token_issued_at | into datetime
       let expires_at = $issued_at + ($expires_in * 1sec)
       let now = date now
-      $"EXPIRY CHECK: issued_at=($issued_at) expires_in=($expires_in) expires_at=($expires_at) now=($now) expired=($now >= $expires_at)\n" | save -a /tmp/session-debug.log
       if $now >= $expires_at {
         # Try to refresh token
         let refresh_token = $session.refresh_token?
@@ -258,9 +251,6 @@ export def handle-oauth-callback [
   # Exchange code for token
   let token_resp = do $provider.token-exchange $client $req.query.code
 
-  # Debug: save token response
-  $token_resp | to json | save -f /tmp/oauth-token-response.json
-
   if $token_resp.status >= 399 {
     .response {status: 400}
     return $"Error: Failed to get token (($token_resp.status))"
@@ -269,10 +259,6 @@ export def handle-oauth-callback [
   # Get user info
   # For Google, pass id_token if available (for JWT decoding), otherwise access_token
   let user_token = $token_resp.body.id_token? | default $token_resp.body.access_token
-
-  # Debug: save user token
-  $user_token | save -f /tmp/oauth-user-token.txt
-
   let user_resp = do $provider.get-user $user_token
 
   if $user_resp.status >= 399 {
@@ -286,21 +272,10 @@ export def handle-oauth-callback [
     | insert user $user_resp.body
     | insert provider $stored_state.provider_name
 
-  # Debug: save session data before storing
-  $"SESSION DATA: ($session_data | to json -r)\n" | save -a /tmp/session-debug.log
-  $"DEBUG: About to call client.sessions.set\n" | save -a /tmp/session-debug.log
-  $"DEBUG: client.sessions type: ($client.sessions | describe)\n" | save -a /tmp/session-debug.log
-
   let session_hash = $session_data | to json -r | do $client.sessions.set
 
-  # Debug: log session hash
-  $"SESSION HASH: ($session_hash)\n" | save -a /tmp/session-debug.log
-  $"DEBUG: Returned from client.sessions.set\n" | save -a /tmp/session-debug.log
-
   # Set session cookie and clear oauth_state cookie
-  $"DEBUG: session_hash for cookie = ($session_hash)\n" | save -a /tmp/session-debug.log
   let set_session = set-cookie $client.redirect "session" $session_hash
-  $"DEBUG: set_session cookie = ($set_session)\n" | save -a /tmp/session-debug.log
   let clear_state = clear-cookie $client.redirect "oauth_state"
 
   .response {
@@ -317,12 +292,8 @@ export def handle-logout [client: record, req: record] {
   let cookies = $req.headers | get cookie? | parse-cookies
   let session_hash = $cookies | get -i session
 
-  $"LOGOUT: session_hash = ($session_hash)\n" | save -a /tmp/session-debug.log
-
   if ($session_hash | is-not-empty) {
-    $"LOGOUT: calling delete for ($session_hash)\n" | save -a /tmp/session-debug.log
     do $client.sessions.delete $session_hash
-    $"LOGOUT: delete called\n" | save -a /tmp/session-debug.log
   }
 
   # Clear both session and state cookies using list syntax for multiple Set-Cookie headers
