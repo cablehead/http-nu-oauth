@@ -44,17 +44,18 @@ export def provider [] {
         grant_type: "authorization_code"
       }
 
-      http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
+      let response = http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
+      $response | to json | save -f /tmp/google-token-response.json
+      $response
     }
 
     # Get user info from Google (decode JWT id_token)
     get-user: {|access_token: string|
       # For Google, we decode the JWT to get user info
-      # In practice, this would be called with the id_token from token_resp.body.id_token
-      # We'll return a synthetic response that mimics the http response format
+      let decoded = $access_token | decode-jwt | get p
       {
         status: 200
-        body: ($access_token | decode-jwt | get p)
+        body: $decoded
       }
     }
 

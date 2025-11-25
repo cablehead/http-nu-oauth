@@ -107,12 +107,17 @@ export def make-session-store [sessions_dir: string] {
       let content = $in
       let hash = $content | hash sha256
       let path = get-storage-path $sessions_dir $hash
+      $"SET: sessions_dir=($sessions_dir) path=($path)\n" | save -a /tmp/session-debug.log
       $content | save -f $path
+      $"SET: save completed for ($hash)\n" | save -a /tmp/session-debug.log
+      $"SET: ls sessions_dir: (ls $sessions_dir | to nuon)\n" | save -a /tmp/session-debug.log
       $hash
     }
 
     get: {|hash|
       let path = get-storage-path $sessions_dir $hash
+      $"GET: sessions_dir=($sessions_dir) path=($path) exists=(($path | path exists))\n" | save -a /tmp/session-debug.log
+      $"GET: ls sessions_dir: (ls $sessions_dir | to nuon)\n" | save -a /tmp/session-debug.log
       if ($path | path exists) {
         open $path
       }
@@ -128,6 +133,7 @@ export def make-session-store [sessions_dir: string] {
 
     delete: {|hash|
       let path = get-storage-path $sessions_dir $hash
+      $"DELETE: sessions_dir=($sessions_dir) path=($path) exists=(($path | path exists))\n" | save -a /tmp/session-debug.log
       if ($path | path exists) {
         rm $path
       }
@@ -156,6 +162,7 @@ export def get-auth [client req providers: record] {
       let issued_at = $session.token_issued_at | into datetime
       let expires_at = $issued_at + ($expires_in * 1sec)
       let now = date now
+      $"EXPIRY CHECK: issued_at=($issued_at) expires_in=($expires_in) expires_at=($expires_at) now=($now) expired=($now >= $expires_at)\n" | save -a /tmp/session-debug.log
       if $now >= $expires_at {
         # Try to refresh token
         let refresh_token = $session.refresh_token?
@@ -167,7 +174,7 @@ export def get-auth [client req providers: record] {
             if $token_resp.status < 399 {
               # Update session with refreshed token
               let updated_session = $token_resp.body
-                | insert token_issued_at (date now | format date "%Y-%m-%dT%H:%M:%S%.3fZ")
+                | insert token_issued_at (date now)
                 | insert user $session.user
                 | insert provider $session.provider
               $updated_session | to json -r | do $client.sessions.update $session_hash
@@ -275,20 +282,25 @@ export def handle-oauth-callback [
 
   # Store session
   let session_data = $token_resp.body
-    | insert token_issued_at (date now | format date "%Y-%m-%dT%H:%M:%S%.3fZ")
+    | insert token_issued_at (date now)
     | insert user $user_resp.body
     | insert provider $stored_state.provider_name
 
   # Debug: save session data before storing
   $"SESSION DATA: ($session_data | to json -r)\n" | save -a /tmp/session-debug.log
+  $"DEBUG: About to call client.sessions.set\n" | save -a /tmp/session-debug.log
+  $"DEBUG: client.sessions type: ($client.sessions | describe)\n" | save -a /tmp/session-debug.log
 
   let session_hash = $session_data | to json -r | do $client.sessions.set
 
   # Debug: log session hash
   $"SESSION HASH: ($session_hash)\n" | save -a /tmp/session-debug.log
+  $"DEBUG: Returned from client.sessions.set\n" | save -a /tmp/session-debug.log
 
   # Set session cookie and clear oauth_state cookie
+  $"DEBUG: session_hash for cookie = ($session_hash)\n" | save -a /tmp/session-debug.log
   let set_session = set-cookie $client.redirect "session" $session_hash
+  $"DEBUG: set_session cookie = ($set_session)\n" | save -a /tmp/session-debug.log
   let clear_state = clear-cookie $client.redirect "oauth_state"
 
   .response {
