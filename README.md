@@ -1,6 +1,7 @@
 # OAuth Library for Nushell
 
-Provider-agnostic OAuth 2.0 for Nushell with [http-nu](https://github.com/cablehead/http-nu).
+Provider-agnostic OAuth 2.0 for Nushell with
+[http-nu](https://github.com/cablehead/http-nu).
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/8bab337e-cdcc-4731-aa58-908ae3f35f86"
@@ -13,15 +14,15 @@ Provider-agnostic OAuth 2.0 for Nushell with [http-nu](https://github.com/cableh
 
 ```
 http-nu-oauth/
-├─ lib.nu                    # Common OAuth logic
-├─ providers/
-│  ├─ mod.nu                 # Provider registry
-│  ├─ discord/mod.nu         # Discord OAuth
-│  └─ google/mod.nu          # Google OAuth
-└─ examples/
-   ├─ config.example.json
-   ├─ serve.nu
-   └─ README.md
+  lib.nu                    # Common OAuth logic
+  providers/
+    mod.nu                  # Provider registry
+    discord/mod.nu          # Discord OAuth
+    google/mod.nu           # Google OAuth
+  examples/
+    config.example.json
+    serve.nu
+    README.md
 ```
 
 ## Quick Start
@@ -54,6 +55,31 @@ cat serve.nu | http-nu :8080 -
 - `handle-logout` - Clear session
 - `generate-state` - Generate CSRF state token
 - `validate-state` - Validate state token
+- `make-simplefile-store` - Create file-based key-value store
+
+## Store Interface
+
+```nushell
+{
+  set: {|| string }           # pipes content, returns hash
+  get: {|hash: string| any }  # returns content or null
+  update: {|hash: string| }   # pipes content, overwrites existing
+  delete: {|hash: string| }
+}
+```
+
+`make-simplefile-store "path"` returns a file-backed store. Swap for
+redis/sqlite by matching the interface. Used for sessions (long-lived) and
+states (ephemeral CSRF tokens).
+
+## Tests
+
+```nushell
+nu test.nu
+```
+
+Uses fixtures in `fixtures/google/` and `fixtures/discord/` for isolated testing
+without network calls.
 
 ## Security Features
 

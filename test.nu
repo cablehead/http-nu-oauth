@@ -6,19 +6,13 @@ use lib.nu *
 use providers
 
 def main [] {
-  print "Running tests...\n"
-
   test-exports
   test-store
   test-google-jwt
   test-session-expiry
-
-  print "\n✓ All tests passed"
 }
 
 def test-exports [] {
-  print "Testing exports..."
-
   # lib.nu exports
   let _ = (make-simplefile-store "test-tmp" | describe)
   let _ = (generate-state "/" "test" | describe)
@@ -30,12 +24,10 @@ def test-exports [] {
   assert ($all_providers | get discord? | is-not-empty) "discord provider missing"
 
   rm -rf test-tmp
-  print "  ✓ exports"
+  print "ok exports"
 }
 
 def test-store [] {
-  print "Testing store..."
-
   let store = make-simplefile-store "test-store"
 
   # set
@@ -59,12 +51,10 @@ def test-store [] {
   assert ($deleted | is-empty) "deleted content should be empty"
 
   rm -rf test-store
-  print "  ✓ store"
+  print "ok store"
 }
 
 def test-google-jwt [] {
-  print "Testing Google JWT decoding..."
-
   let fixture = open fixtures/google/token-response.json
   let provider = providers all | get google
 
@@ -75,12 +65,10 @@ def test-google-jwt [] {
   assert ($user_resp.body.email == "test@example.com") "email should match"
   assert ($user_resp.body.iss == "https://accounts.google.com") "issuer should match"
 
-  print "  ✓ google jwt"
+  print "ok google-jwt"
 }
 
 def test-session-expiry [] {
-  print "Testing session expiry..."
-
   let store = make-simplefile-store "test-sessions"
 
   # Create a session that's NOT expired (issued now, expires in 1 hour)
@@ -118,7 +106,7 @@ def test-session-expiry [] {
   assert ($now >= $expires_at2) "session should be expired"
 
   rm -rf test-sessions
-  print "  ✓ session expiry"
+  print "ok session-expiry"
 }
 
 def assert [condition: bool, message: string] {
