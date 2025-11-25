@@ -1,0 +1,21 @@
+{
+  "access_token": "ya29.REDACTED_ACCESS_TOKEN",
+  "expires_in": 3599,
+  "scope": "https://www.googleapis.com/auth/userinfo.email openid",
+  "token_type": "Bearer",
+  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjkzYTkzNThjY2Y5OWYxYmIwNDBiYzYyMjFkNTQ5M2UxZmZkOGFkYTEiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiIwMDAwMDAwMDAwMDAteHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsImF1ZCI6IjAwMDAwMDAwMDAwMC14eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4LmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwic3ViIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwiaGQiOiJleGFtcGxlLmNvbSIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJhdF9oYXNoIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFgiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMzYwMH0.REDACTED_SIGNATURE_NOT_VERIFIED",
+  "token_issued_at": "2025-01-01T00:00:00.000-05:00",
+  "user": {
+    "iss": "https://accounts.google.com",
+    "azp": "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+    "aud": "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+    "sub": "000000000000000000000",
+    "hd": "example.com",
+    "email": "test@example.com",
+    "email_verified": true,
+    "at_hash": "XXXXXXXXXXXXXXXXXXXX",
+    "iat": 1700000000,
+    "exp": 1700003600
+  },
+  "provider": "google"
+}

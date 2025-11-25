@@ -213,7 +213,7 @@ export def handle-oauth-callback [
 ] {
   # Validate state (CSRF protection)
   let cookies = $req.headers | get cookie? | parse-cookies
-  let state_hash = $cookies | get -i oauth_state
+  let state_hash = $cookies | get -o oauth_state
 
   if ($state_hash | is-empty) {
     .response {status: 400}
@@ -221,7 +221,7 @@ export def handle-oauth-callback [
   }
 
   let stored_state = do $client.states.get $state_hash | from json
-  let state_token = $req.query | get -i state
+  let state_token = $req.query | get -o state
 
   if $state_token != $stored_state.token {
     .response {status: 400}
@@ -232,7 +232,7 @@ export def handle-oauth-callback [
   do $client.states.delete $state_hash
 
   # Validate code
-  if ($req.query | get -i code | is-empty) {
+  if ($req.query | get -o code | is-empty) {
     .response {status: 400}
     return "Error: No auth code provided"
   }
@@ -279,7 +279,7 @@ export def handle-oauth-callback [
 # Handle logout
 export def handle-logout [client: record, req: record] {
   let cookies = $req.headers | get cookie? | parse-cookies
-  let session_hash = $cookies | get -i session
+  let session_hash = $cookies | get -o session
 
   if ($session_hash | is-not-empty) {
     do $client.sessions.delete $session_hash

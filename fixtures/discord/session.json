@@ -1,0 +1,20 @@
+{
+  "access_token": "REDACTED_DISCORD_ACCESS_TOKEN",
+  "token_type": "Bearer",
+  "expires_in": 604800,
+  "refresh_token": "REDACTED_DISCORD_REFRESH_TOKEN",
+  "scope": "identify email",
+  "token_issued_at": "2025-01-01T00:00:00.000-05:00",
+  "user": {
+    "id": "000000000000000000",
+    "username": "testuser",
+    "discriminator": "0",
+    "global_name": "Test User",
+    "avatar": "abc123def456",
+    "email": "test@example.com",
+    "verified": true,
+    "flags": 0,
+    "premium_type": 0
+  },
+  "provider": "discord"
+}

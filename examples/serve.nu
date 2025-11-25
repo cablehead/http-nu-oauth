@@ -92,7 +92,7 @@ def render-user-info [auth: record] {
     {method: "GET", path: "/auth/callback"} => {
       # Get provider name from state cookie
       let cookies = $req.headers | get cookie? | parse-cookies
-      let state_hash = $cookies | get -i oauth_state
+      let state_hash = $cookies | get -o oauth_state
 
       if ($state_hash | is-empty) {
         .response {status: 400}
@@ -100,11 +100,8 @@ def render-user-info [auth: record] {
       }
 
       # Load state to get provider name
-      let base_dir = $env.PWD
-      let sessions_dir = $base_dir | path join "sessions"
-      let states_dir = $base_dir | path join "states"
       let temp_client = {
-        states: (make-session-store $states_dir)
+        states: (make-simplefile-store "states")
       }
 
       let state_data = do $temp_client.states.get $state_hash

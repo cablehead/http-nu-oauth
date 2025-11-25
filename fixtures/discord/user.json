@@ -1,0 +1,11 @@
+{
+  "id": "000000000000000000",
+  "username": "testuser",
+  "discriminator": "0",
+  "global_name": "Test User",
+  "avatar": "abc123def456",
+  "email": "test@example.com",
+  "verified": true,
+  "flags": 0,
+  "premium_type": 0
+}
