@@ -92,45 +92,34 @@ export def clear-cookie [
 }
 
 # ============================================================================
-# Session Storage
+# Storage
 # ============================================================================
 
-# Helper to get storage path - called from within closures
-def get-storage-path [base_dir: string, hash: string] {
-  $base_dir | path join $hash
-}
-
-# Create session store with filesystem backend
-export def make-session-store [sessions_dir: string] {
-  return {
+# Create a simple file-based key-value store
+export def make-simplefile-store [path: string] {
+  mkdir $path
+  {
     set: {||
       let content = $in
       let hash = $content | hash sha256
-      let path = get-storage-path $sessions_dir $hash
-      $content | save -f $path
+      $content | save -f ($path | path join $hash)
       $hash
     }
 
     get: {|hash|
-      let path = get-storage-path $sessions_dir $hash
-      if ($path | path exists) {
-        open $path
-      }
+      let file = $path | path join $hash
+      if ($file | path exists) { open $file }
     }
 
     update: {|hash|
       let content = $in
-      let path = get-storage-path $sessions_dir $hash
-      if ($path | path exists) {
-        $content | save -f $path
-      }
+      let file = $path | path join $hash
+      if ($file | path exists) { $content | save -f $file }
     }
 
     delete: {|hash|
-      let path = get-storage-path $sessions_dir $hash
-      if ($path | path exists) {
-        rm $path
-      }
+      let file = $path | path join $hash
+      if ($file | path exists) { rm $file }
     }
   }
 }

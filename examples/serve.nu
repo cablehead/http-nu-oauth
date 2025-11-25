@@ -5,21 +5,14 @@ def load-client [provider_name: string] {
   let config = $env.OAUTH_CONFIG | from json
   let provider_config = $config.providers | get $provider_name
 
-  let base_dir = $env.PWD
-  let sessions_dir = $base_dir | path join "sessions"
-  mkdir $sessions_dir
-
-  let states_dir = $base_dir | path join "states"
-  mkdir $states_dir
-
   {
     provider_name: $provider_name
     id: $provider_config.client_id
     secret: $provider_config.client_secret
     redirect: $config.redirect_uri
     scopes: $provider_config.scopes
-    sessions: (make-session-store $sessions_dir)
-    states: (make-session-store $states_dir)
+    sessions: (make-simplefile-store "sessions")
+    states: (make-simplefile-store "states")
   }
 }
 
