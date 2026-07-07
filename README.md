@@ -116,13 +116,31 @@ without network calls.
 
 ## Security Features
 
-- CSRF protection with random state validation
-- State tokens expire after 5 minutes and are single-use
-- Access tokens respect provider TTL and expire automatically
-- Automatic token refresh using refresh_token when available
-- Session identifiers use SHA256 hashing
-- Cookies: HttpOnly, SameSite=Lax, Secure (HTTPS)
-- PKCE not implemented (planned)
+- **Store key validation** — keys arrive from an attacker-controlled cookie, so
+  every store validates them (`^[a-f0-9]{64}$`) at the get/update/delete
+  boundary. This blocks path traversal (file impl) and topic injection (xs
+  impl); a malformed key reads as absent.
+- **CSRF state** — random state token, validated on callback, enforced
+  single-use and with a configurable TTL (`STATE_TTL`, default 5 min). Our
+  policy, distinct from provider session lifetime.
+- **Bounded state store** — expired states are reclaimed (file impl sweeps on
+  write / expires on read; xs impl uses native frame TTL), so states can't grow
+  without bound (DoS).
+- **CSRF-protected logout** — `/auth/logout` requires a per-session token, so a
+  cross-site request can't force-logout the user.
+- **Open-redirect protection** — the post-login `return_to` is clamped to a
+  same-origin path (rejects absolute URLs and `//host` / `/\host`).
+- **Provider session TTL** — sessions respect the provider's `expires_in`; an
+  expired session is refreshed via `refresh_token` when possible, otherwise
+  evicted. Session identifiers are SHA256 digests.
+- **Allowlist on immutable IDs** — authorization keys on provider-issued,
+  immutable IDs (Discord `id`, Google `sub` + `email_verified`), never a
+  username or email.
+- **JWT trust boundary** — the Google `id_token` is only decoded from
+  token-endpoint output; unsigned (`alg=none`) and malformed tokens are
+  rejected (see the note in `providers/google/mod.nu`).
+- **Cookies** — HttpOnly, SameSite=Lax, Secure (HTTPS).
+- PKCE not implemented (planned).
 
 ## Adding Providers
 
