@@ -1,14 +1,35 @@
 # Google OAuth Provider
 # Implements Google OAuth 2.0 flow with JWT support
 
-# Decode Google JWT ID token
+# Decode a Google JWT ID token.
+#
+# SECURITY: this decodes but does NOT verify the RS256 signature. It is only
+# safe because get-user is fed the id_token straight from Google's token
+# endpoint (fetched over TLS in token-exchange), which authenticates the token
+# by transport. This function MUST NEVER be called on a token from an
+# untrusted source (e.g. a user-supplied header/cookie): an attacker could
+# forge arbitrary claims. To accept tokens from untrusted sources, verify the
+# signature against Google's JWKS or call verify-token (tokeninfo) first.
+#
+# As defence-in-depth we still refuse the classic forgery — an unsigned
+# ("alg":"none") token — and structurally malformed input.
 def decode-jwt []: string -> record {
   let $token = $in
   let parts = $token | split row "."
 
+  if ($parts | length) != 3 {
+    error make {msg: "malformed JWT: expected 3 dot-separated segments"}
+  }
+
   # JWT uses base64url encoding without padding
+  let header = ($parts.0 | decode base64 --url --nopad | decode)
+  let alg = ($header | from json | get alg? | default "" | str downcase)
+  if $alg == "none" {
+    error make {msg: "refusing to decode unsigned (alg=none) JWT"}
+  }
+
   {
-    h: ($parts.0 | decode base64 --url --nopad | decode)
+    h: $header
     p: ($parts.1 | decode base64 --url --nopad | decode | from json)
     sig: $parts.2
   }
@@ -47,7 +68,10 @@ export def provider [] {
       http post --full --allow-errors $token_url --content-type "application/x-www-form-urlencoded" $params
     }
 
-    # Get user info from Google (decode JWT id_token)
+    # Get user info from Google by decoding the id_token JWT.
+    # The argument MUST be an id_token obtained from token-exchange (Google's
+    # token endpoint) — see decode-jwt's security note. Do not pass a token
+    # from any untrusted source without verifying its signature first.
     get-user: {|access_token: string|
       # For Google, we decode the JWT to get user info
       let decoded = $access_token | decode-jwt | get p

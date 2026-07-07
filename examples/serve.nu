@@ -12,7 +12,7 @@ def load-client [provider_name: string] {
     redirect: $config.redirect_uri
     scopes: $provider_config.scopes
     sessions: (make-simplefile-store "sessions")
-    states: (make-simplefile-store "states")
+    states: (make-simplefile-store "states" --ttl $STATE_TTL)
   }
 }
 
@@ -68,7 +68,7 @@ def render-user-info [auth: record] {
       ($user_fields)
     </table>
     <hr>
-    <p><a href='/auth/logout'>Logout</a></p>
+    <p><a href='/auth/logout?csrf=($auth.csrf_token? | default "")'>Logout</a></p>
   </body>
   </html>"
 }
@@ -101,7 +101,7 @@ def render-user-info [auth: record] {
 
       # Load state to get provider name
       let temp_client = {
-        states: (make-simplefile-store "states")
+        states: (make-simplefile-store "states" --ttl $STATE_TTL)
       }
 
       let state_data = do $temp_client.states.get $state_hash

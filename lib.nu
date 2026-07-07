@@ -29,21 +29,45 @@ export def generate-state [return_to: string, provider_name: string] {
   }
 }
 
-# Validate state token matches stored state
-export def validate-state [state_token: string, stored_states: list] {
+# Clamp a post-login redirect target to a same-origin path, defeating open
+# redirects. Only a plain absolute path ("/...") is allowed; anything else
+# (absolute URL, protocol-relative "//host" or "/\host", or a non-string)
+# falls back to "/".
+export def safe-return-to [return_to: any] {
+  if ($return_to | describe) != "string" { return "/" }
+  if not ($return_to | str starts-with "/") { return "/" }
+  if ($return_to | str starts-with "//") { return "/" }
+  if ($return_to | str starts-with '/\') { return "/" }
+  $return_to
+}
+
+# Lifetime of a CSRF state token. We (the relying party) mint the state, so its
+# lifetime is our policy — there is nothing authoritative in the token to derive
+# it from. This is distinct from session lifetime, which is driven by the
+# provider's `expires_in` (see get-auth). Override per-call via `--ttl`.
+export const STATE_TTL = 5min
+
+# Validate state token matches stored state.
+# state_token is `any` because it comes straight from a query param and may be
+# null (missing); a null/mismatched token simply fails to match.
+export def validate-state [state_token: any, stored_states: list, --ttl: duration] {
+  let limit = ($ttl | default $STATE_TTL)
+
+  if ($state_token | is-empty) {
+    return null
+  }
+
   let match = $stored_states | where token == $state_token | first
 
   if ($match | is-empty) {
     return null
   }
 
-  # Check if state is expired (5 minutes)
+  # Reject states older than the policy TTL.
   let created = $match.created_at | into datetime
   let now = date now
-  let age = ($now - $created) | into int
 
-  if $age > 300_000_000_000 {
-    # 5 minutes in nanoseconds
+  if ($now - $created) > $limit {
     return null
   }
 
@@ -93,36 +117,198 @@ export def clear-cookie [
 }
 
 # ============================================================================
-# Storage
+# Storage interface
 # ============================================================================
+#
+# A store is a record of closures. It is a key/value store where the key is
+# minted by the store (not chosen by the caller) and the value is an opaque
+# UTF-8 string (callers store JSON).
+#
+#   set:    {|| -> string }          # pipe value in; returns a fresh KEY
+#   get:    {|key: string| -> any }  # returns the stored value, or null
+#   update: {|key: string| }         # pipe value in; overwrites value at KEY
+#   delete: {|key: string| }         # removes KEY
+#   sweep:  {|| }                    # GC expired entries (no-op without ttl)
+#
+# Contract:
+#   - KEY FORMAT: keys are opaque tokens minted by `set`. Every implementation
+#     here mints a 64-char lowercase-hex key (see valid-store-key). Callers MUST
+#     treat keys as opaque and MUST NOT construct their own.
+#   - KEY VALIDATION (load-bearing): keys reach the store straight from an
+#     attacker-controlled cookie. Implementations MUST validate the key shape at
+#     the get/update/delete boundary and treat any malformed key as absent —
+#     never letting it escape the store's namespace (no path traversal, no topic
+#     injection).
+#   - RETURN TYPES: get returns the stored string, or null when the key is
+#     absent, malformed, or expired. set returns the new key (string). update
+#     and delete return nothing.
+#   - ERROR BEHAVIOR: get/update/delete on an absent or malformed key never
+#     throw — get yields null, update/delete are no-ops.
+#   - TTL: a store MAY be created with a TTL for ephemeral entries (CSRF
+#     states). Entries past their TTL read as null; how they are reclaimed is
+#     the implementation's concern (file: mtime sweep; xs: native frame TTL).
+#
+# Two implementations follow: make-simplefile-store (file-backed) and
+# make-xs-store (cross.stream-backed). Both satisfy this contract and are
+# exercised by the same table-driven suite in test-contract.nu.
 
-# Create a simple file-based key-value store
-export def make-simplefile-store [path: string] {
+# Store keys are 64-char lowercase-hex tokens (a SHA256 digest for the file
+# store, random bytes for the xs store). Validating this shape at the boundary
+# is what stops a "../" cookie value from escaping the store's namespace (path
+# traversal / topic injection). Any key that isn't exactly 64 hex chars is
+# rejected.
+export def valid-store-key [] {
+  let key = $in
+  ($key | describe) == "string" and ($key =~ '^[a-f0-9]{64}$')
+}
+
+# Remove every file under $path whose mtime is older than $ttl. Used to bound
+# disk for ephemeral entries (states) so an attacker cannot flood the store.
+def sweep-expired [path: string, ttl: duration] {
+  let now = date now
+  ls $path | where type == file | where { |r| ($now - $r.modified) > $ttl } | each { |r|
+    rm -f $r.name
+  }
+  null
+}
+
+# Create a simple file-based key-value store.
+#
+# --ttl marks the store as holding ephemeral entries: reads lazily expire stale
+# files and every write sweeps expired files, so the directory stays bounded.
+# Omit --ttl for long-lived entries (sessions).
+export def make-simplefile-store [path: string, --ttl: duration] {
   mkdir $path
   {
     set: {||
       let content = $in
       let hash = $content | hash sha256
-      $content | save -f ($path | path join $hash)
+      $content | save -r -f ($path | path join $hash)
+      if $ttl != null { sweep-expired $path $ttl }
       $hash
     }
 
     get: {|hash|
+      if not ($hash | valid-store-key) { return null }
       let file = $path | path join $hash
-      if ($file | path exists) { open $file }
+      if not ($file | path exists) { return null }
+      if $ttl != null {
+        let age = (date now) - (ls $file | get 0.modified)
+        if $age > $ttl {
+          rm -f $file
+          return null
+        }
+      }
+      open -r $file
     }
 
     update: {|hash|
       let content = $in
+      if not ($hash | valid-store-key) { return }
       let file = $path | path join $hash
-      if ($file | path exists) { $content | save -f $file }
+      if ($file | path exists) { $content | save -r -f $file }
     }
 
     delete: {|hash|
+      if not ($hash | valid-store-key) { return }
       let file = $path | path join $hash
       if ($file | path exists) { rm $file }
     }
+
+    # Proactively remove expired entries (no-op when the store has no ttl).
+    sweep: {||
+      if $ttl != null { sweep-expired $path $ttl }
+    }
   }
+}
+
+# Mint a fresh opaque store key: 64 lowercase-hex chars (two random UUIDs with
+# their dashes stripped). Matches valid-store-key.
+def new-store-key [] {
+  [(random uuid) (random uuid)] | str join | str replace --all "-" ""
+}
+
+# Create a cross.stream (xs) key-value store.
+#
+# Requires the xs store commands (.append/.last/.cas/.cat/.remove) — i.e. run
+# under `http-nu --store <dir>` (or `http-nu eval --store <dir>` in tests).
+#
+# Each logical entry is its own topic `<base>.<key>`, and the entry's value is
+# that topic's most recent frame (content lives in CAS, referenced by the
+# frame's hash). This gives a mutable cell with a stable key:
+#   - set/update append to the topic with `--ttl last:1`, so only the current
+#     value is retained (superseded versions are pruned by the store).
+#   - a --ttl store instead appends with a native frame ttl (e.g. "time:300000")
+#     so ephemeral entries (states) expire on their own — no manual sweep.
+# `base` must be a valid topic segment (e.g. "session", "state").
+export def make-xs-store [base: string, --ttl: string] {
+  # Non-ttl (long-lived) stores keep only the latest value per key; ttl stores
+  # use the caller's native xs ttl.
+  let retention = ($ttl | default "last:1")
+  {
+    set: {||
+      let content = $in
+      let key = new-store-key
+      $content | .append $"($base).($key)" --ttl $retention | ignore
+      $key
+    }
+
+    get: {|key|
+      if not ($key | valid-store-key) { return null }
+      let frame = .last $"($base).($key)"
+      if ($frame | is-empty) { return null }
+      .cas $frame.hash
+    }
+
+    update: {|key|
+      let content = $in
+      if not ($key | valid-store-key) { return }
+      $content | .append $"($base).($key)" --ttl $retention | ignore
+    }
+
+    delete: {|key|
+      if not ($key | valid-store-key) { return }
+      .cat --topic $"($base).($key)" | each {|frame| .remove $frame.id } | ignore
+    }
+
+    # Ephemeral entries expire via native frame ttl; nothing to sweep.
+    sweep: {|| }
+  }
+}
+
+# ============================================================================
+# Authorization / allowlist
+#
+# A hard allowlist gates destructive actions, so it MUST key on an immutable,
+# provider-issued account identifier — never a username or email. Usernames and
+# email addresses can be changed, and (for some providers) reassigned to a
+# different person after an account is deleted, which would silently grant a
+# stranger admin rights.
+#   - Discord: `user.id` (snowflake) is immutable.
+#   - Google:  `user.sub` (subject) is immutable and stable per app; only trust
+#              it when `email_verified` is true.
+# ============================================================================
+
+# Extract the stable identifier to allowlist against, or null if none can be
+# trusted for this provider/user.
+export def account-id [provider: string, user: record] {
+  match $provider {
+    "discord" => ($user.id? | default null)
+    "google" => {
+      # Google may send email_verified as a bool or the string "true".
+      let verified = ($user.email_verified? in [true "true"])
+      if $verified { $user.sub? | default null } else { null }
+    }
+    _ => null
+  }
+}
+
+# Is this authenticated user on the allowlist of immutable IDs? The allowlist
+# holds provider-issued IDs (Discord snowflakes / Google subs), never
+# usernames or emails.
+export def is-allowed [provider: string, user: record, allowlist: list] {
+  let id = account-id $provider $user
+  ($id | is-not-empty) and ($id in $allowlist)
 }
 
 # ============================================================================
@@ -155,11 +341,15 @@ export def get-auth [client req providers: record] {
           if ($token_refresh | is-not-empty) {
             let token_resp = do $token_refresh $client $refresh_token
             if $token_resp.status < 399 {
-              # Update session with refreshed token
+              # Update session with refreshed token. Carry forward fields the
+              # refresh response omits: the csrf_token (logout gate) and, when
+              # the provider didn't reissue one, the refresh_token itself.
               let updated_session = $token_resp.body
               | insert token_issued_at (date now)
               | insert user $session.user
               | insert provider $session.provider
+              | insert csrf_token ($session.csrf_token? | default (random uuid))
+              | upsert refresh_token ($token_resp.body.refresh_token? | default $refresh_token)
               $updated_session | to json -r | do $client.sessions.update $session_hash
               return $updated_session
             }
@@ -221,16 +411,28 @@ export def handle-oauth-callback [
     return "Error: Missing state cookie"
   }
 
-  let stored_state = do $client.states.get $state_hash | from json
-  let state_token = $req.query | get -o state
-
-  if $state_token != $stored_state.token {
+  let stored_raw = do $client.states.get $state_hash
+  if ($stored_raw | is-empty) {
+    # Unknown, expired (TTL swept), or already-used state.
     .response {status: 400}
-    return "Error: Invalid state (CSRF check failed)"
+    return "Error: Invalid or expired state"
   }
 
-  # Delete used state (one-time use)
+  let stored_state = $stored_raw | from json
+  let state_token = $req.query | get -o state
+
+  # Validate token match + 5-minute TTL (single use is enforced by the delete
+  # below, which runs whether or not validation passes).
+  let valid = validate-state $state_token [$stored_state]
+
+  # Consume the state before deciding: one-time use, and an expired state must
+  # not linger.
   do $client.states.delete $state_hash
+
+  if ($valid | is-empty) {
+    .response {status: 400}
+    return "Error: Invalid or expired state (CSRF check failed)"
+  }
 
   # Validate code
   if ($req.query | get -o code | is-empty) {
@@ -256,11 +458,12 @@ export def handle-oauth-callback [
     return "Error: Failed to fetch user info"
   }
 
-  # Store session
+  # Store session. csrf_token gates state-changing actions like logout.
   let session_data = $token_resp.body
   | insert token_issued_at (date now)
   | insert user $user_resp.body
   | insert provider $stored_state.provider_name
+  | insert csrf_token (random uuid)
 
   let session_hash = $session_data | to json -r | do $client.sessions.set
 
@@ -271,16 +474,40 @@ export def handle-oauth-callback [
   .response {
     status: 302
     headers: {
-      Location: $stored_state.return_to
+      Location: (safe-return-to $stored_state.return_to)
       "Set-Cookie": [$set_session $clear_state]
     }
   }
+}
+
+# Decide whether a logout request is authorized (CSRF check). Logout is
+# state-changing, so it must carry a token that only the real session holder
+# can know. We use a per-session synchronizer token minted at login:
+#   - no active session: nothing to protect, allow (idempotent cookie clear).
+#   - session predates this token (legacy): can't verify, allow (best effort).
+#   - otherwise: the presented token must equal the session's csrf_token.
+export def logout-authorized [session: any, provided_csrf: any] {
+  if ($session | is-empty) { return true }
+  let expected = $session.csrf_token?
+  if ($expected | is-empty) { return true }
+  ($provided_csrf | is-not-empty) and ($provided_csrf == $expected)
 }
 
 # Handle logout
 export def handle-logout [client: record, req: record] {
   let cookies = $req.headers | get cookie? | parse-cookies
   let session_hash = $cookies | get -o session
+
+  let session = $session_hash | and-then {
+    do $client.sessions.get $in | and-then { from json }
+  }
+  let provided_csrf = $req | get -o query | default {} | get -o csrf
+
+  # Reject state-changing GET without a valid CSRF token.
+  if not (logout-authorized $session $provided_csrf) {
+    .response {status: 403}
+    return "Error: Invalid CSRF token"
+  }
 
   if ($session_hash | is-not-empty) {
     do $client.sessions.delete $session_hash
