@@ -55,7 +55,7 @@ cat serve.nu | http-nu :8080 -
 - `handle-logout` - Clear session
 - `generate-state` - Generate CSRF state token
 - `validate-state` - Validate state token
-- `make-simplefile-store` - Create file-based key-value store
+- `make-file-store` - Create file-based key-value store
 - `make-xs-store` - Create cross.stream-backed key-value store
 
 ## Storage Interface
@@ -92,15 +92,18 @@ choose it) and the value is an opaque string (callers store JSON):
 
 **Implementations**
 
-- `make-simplefile-store "path" [--ttl <duration>]` — file-backed. Keys are
-  SHA256 digests used as filenames; atomic raw reads/writes; `--ttl` lazily
-  expires stale files on read and sweeps on write.
-- `make-xs-store "base" [--ttl <xs-ttl>]` — [cross.stream](https://cross.stream)
+Both take an optional `--ttl <duration>`: omit it for a **persistent** store
+(sessions), pass it for an **expiring** store (states, CSRF).
+
+- `make-file-store "path" [--ttl <duration>]` — file-backed. Keys are SHA256
+  digests used as filenames; atomic raw reads/writes; `--ttl` lazily expires
+  stale files on read and sweeps on write.
+- `make-xs-store "base" [--ttl <duration>]` — [cross.stream](https://cross.stream)
   backed. Each entry is a topic `<base>.<key>` whose latest frame is the value
-  (content in CAS). Long-lived stores keep only the current value per key
-  (`--ttl last:1`); ephemeral stores use a native frame ttl (e.g.
-  `--ttl "time:300000"`) so states expire on their own — no manual sweep.
-  Requires the xs store commands, i.e. run under `http-nu --store <dir>`.
+  (content in CAS). A persistent store keeps only the current value per key
+  (`last:1`); an expiring store translates `--ttl` to a native frame ttl
+  (`time:<ms>`) so states expire on their own — no manual sweep. Requires the xs
+  store commands, i.e. run under `http-nu --store <dir>`.
 
 Both implementations satisfy the same contract and are verified by the same
 table-driven suite (`test-contract.nu`), run against both.

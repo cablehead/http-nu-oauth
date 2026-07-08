@@ -148,9 +148,11 @@ export def clear-cookie [
 #     states). Entries past their TTL read as null; how they are reclaimed is
 #     the implementation's concern (file: mtime sweep; xs: native frame TTL).
 #
-# Two implementations follow: make-simplefile-store (file-backed) and
-# make-xs-store (cross.stream-backed). Both satisfy this contract and are
-# exercised by the same table-driven suite in test-contract.nu.
+# Two implementations follow: make-file-store (file-backed) and make-xs-store
+# (cross.stream-backed). Both satisfy this contract and are exercised by the
+# same table-driven suite in test-contract.nu. Both take an optional --ttl
+# (a nushell duration): omit it for a PERSISTENT store (sessions), pass it for
+# an EXPIRING store (states).
 
 # Store keys are 64-char lowercase-hex tokens (a SHA256 digest for the file
 # store, random bytes for the xs store). Validating this shape at the boundary
@@ -163,7 +165,7 @@ export def valid-store-key [] {
 }
 
 # Remove every file under $path whose mtime is older than $ttl. Used to bound
-# disk for ephemeral entries (states) so an attacker cannot flood the store.
+# disk for an expiring store (states) so an attacker cannot flood it.
 def sweep-expired [path: string, ttl: duration] {
   let now = date now
   ls $path | where type == file | where { |r| ($now - $r.modified) > $ttl } | each { |r|
@@ -172,12 +174,12 @@ def sweep-expired [path: string, ttl: duration] {
   null
 }
 
-# Create a simple file-based key-value store.
+# Create a file-based key-value store.
 #
-# --ttl marks the store as holding ephemeral entries: reads lazily expire stale
-# files and every write sweeps expired files, so the directory stays bounded.
-# Omit --ttl for long-lived entries (sessions).
-export def make-simplefile-store [path: string, --ttl: duration] {
+# Persistent by default. Pass --ttl to make it EXPIRING: reads lazily expire
+# stale files and every write sweeps expired files, so the directory stays
+# bounded (sessions omit --ttl; states pass one).
+export def make-file-store [path: string, --ttl: duration] {
   mkdir $path
   {
     set: {||
@@ -235,16 +237,21 @@ def new-store-key [] {
 #
 # Each logical entry is its own topic `<base>.<key>`, and the entry's value is
 # that topic's most recent frame (content lives in CAS, referenced by the
-# frame's hash). This gives a mutable cell with a stable key:
-#   - set/update append to the topic with `--ttl last:1`, so only the current
-#     value is retained (superseded versions are pruned by the store).
-#   - a --ttl store instead appends with a native frame ttl (e.g. "time:300000")
-#     so ephemeral entries (states) expire on their own — no manual sweep.
+# frame's hash). This gives a mutable cell with a stable key. --ttl (a nushell
+# duration, same as the file store) selects the frame retention:
+#   - PERSISTENT (no --ttl): append with `last:1`, so only the current value is
+#     retained (superseded versions are pruned by the store), kept indefinitely.
+#   - EXPIRING (--ttl): append with a native frame ttl (`time:<ms>`), so entries
+#     (states) expire on their own — no manual sweep.
 # `base` must be a valid topic segment (e.g. "session", "state").
-export def make-xs-store [base: string, --ttl: string] {
-  # Non-ttl (long-lived) stores keep only the latest value per key; ttl stores
-  # use the caller's native xs ttl.
-  let retention = ($ttl | default "last:1")
+export def make-xs-store [base: string, --ttl: duration] {
+  # Translate the duration to xs's native frame-ttl form; persistent stores keep
+  # only the latest value per key.
+  let retention = if $ttl == null {
+    "last:1"
+  } else {
+    $"time:($ttl / 1ms | into int)"
+  }
   {
     set: {||
       let content = $in

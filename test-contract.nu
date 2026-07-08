@@ -79,16 +79,16 @@ def assert [condition: bool, message: string] {
 
 # File-backed impl (ttl expressed as a nushell duration).
 run-suite "file" (
-  make-simplefile-store (mktemp -d)
+  make-file-store (mktemp -d)
 ) (
-  make-simplefile-store (mktemp -d) --ttl 400ms
+  make-file-store (mktemp -d) --ttl 400ms
 ) 900ms
 
-# xs (cross.stream) impl (ttl expressed as a native xs frame ttl string).
+# xs (cross.stream) impl (same duration ttl; translated to a native frame ttl).
 run-suite "xs" (
   make-xs-store "session"
 ) (
-  make-xs-store "state" --ttl "time:400"
+  make-xs-store "state" --ttl 400ms
 ) 900ms
 
 print "ok store-contract (file + xs)"

@@ -25,7 +25,7 @@ def main [] {
 
 def test-exports [] {
   # lib.nu exports
-  let _ = (make-simplefile-store "test-tmp" | describe)
+  let _ = (make-file-store "test-tmp" | describe)
   let _ = (generate-state "/" "test" | describe)
   let _ = (parse-cookies | describe)
 
@@ -39,7 +39,7 @@ def test-exports [] {
 }
 
 def test-store [] {
-  let store = make-simplefile-store "test-store"
+  let store = make-file-store "test-store"
 
   # set
   let content = '{"test": "data"}'
@@ -80,7 +80,7 @@ def test-google-jwt [] {
 }
 
 def test-session-expiry [] {
-  let store = make-simplefile-store "test-sessions"
+  let store = make-file-store "test-sessions"
 
   # Create a session that's NOT expired (issued now, expires in 1 hour)
   let valid_session = {
@@ -125,7 +125,7 @@ def test-session-expiry [] {
 # usable refresh_token must be rejected AND evicted.
 def test-session-expiry-enforced [] {
   let sandbox = mktemp -d
-  let store = make-simplefile-store ($sandbox | path join "sessions")
+  let store = make-file-store ($sandbox | path join "sessions")
 
   # Issued 2h ago, expires_in 1h -> expired; no refresh_token to recover.
   let expired = {
@@ -187,7 +187,7 @@ def test-store-ttl [] {
   let sandbox = mktemp -d
 
   # TTL store: lazy expiry on get.
-  let ttl_store = make-simplefile-store ($sandbox | path join "states") --ttl 5min
+  let ttl_store = make-file-store ($sandbox | path join "states") --ttl 5min
   let k = '{"s": 1}' | do $ttl_store.set
   assert ((do $ttl_store.get $k) == '{"s": 1}') "fresh ttl entry must read back"
 
@@ -205,7 +205,7 @@ def test-store-ttl [] {
   assert ((do $ttl_store.get $new) == '{"new": 1}') "fresh entry must survive sweep"
 
   # No-ttl store never expires and sweep() is a no-op.
-  let sess_store = make-simplefile-store ($sandbox | path join "sessions")
+  let sess_store = make-file-store ($sandbox | path join "sessions")
   let sk = '{"long": "lived"}' | do $sess_store.set
   ^touch -d "2000-01-01" ($sandbox | path join "sessions" | path join $sk)
   do $sess_store.sweep
@@ -323,7 +323,7 @@ def test-logout-csrf [] {
 # The store boundary must reject any key that is not 64 lowercase hex chars.
 def test-store-key-validation [] {
   let sandbox = mktemp -d
-  let store = make-simplefile-store ($sandbox | path join "store")
+  let store = make-file-store ($sandbox | path join "store")
 
   # A real (valid) key round-trips.
   let good = '{"ok": true}' | do $store.set
@@ -366,7 +366,7 @@ def test-store-key-validation [] {
 # Regression at the exact boundary handle-logout calls.
 def test-traversal-delete [] {
   let sandbox = mktemp -d
-  let store = make-simplefile-store ($sandbox | path join "sessions")
+  let store = make-file-store ($sandbox | path join "sessions")
 
   let victim = $sandbox | path join "important.db"
   "do-not-delete" | save -f $victim
@@ -384,7 +384,7 @@ def test-traversal-delete [] {
 # and no expires_in makes get-auth return it as a valid session.
 def test-traversal-auth-bypass [] {
   let sandbox = mktemp -d
-  let store = make-simplefile-store ($sandbox | path join "sessions")
+  let store = make-file-store ($sandbox | path join "sessions")
 
   # Attacker-controlled / pre-existing file containing JSON somewhere on disk.
   # (No .json extension so `open` yields a raw string, exactly as a real
