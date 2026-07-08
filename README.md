@@ -202,24 +202,21 @@ Both satisfy the same contract and are checked by the same table-driven suite
 
 ## TTL
 
-Two clocks, kept separate on purpose:
+Two expiry clocks, tracked separately:
 
-| Clock | Whose call | Set by |
-| ----- | ---------- | ------ |
-| **Session** lifetime | the provider's — it's data | the token's `expires_in`; `get-auth` refreshes or evicts |
-| **State** lifetime (CSRF) | ours — it's policy | `STATE_TTL`, default `5min` |
+| Clock | Set by |
+| ----- | ------ |
+| Session | the token's `expires_in`. `get-auth` refreshes or evicts. |
+| State (CSRF) | `STATE_TTL`, default `5min`. |
 
-The **store** takes one knob, `--ttl <duration>`, that works the same on both
-backends:
+Stores take one flag, `--ttl <duration>`:
 
-- **omit it** → *persistent* store (sessions): kept until you delete it.
-- **pass it** → *expiring* store (states): each entry vanishes on its own once
-  the duration is up.
+- omit it: persistent (sessions). Kept until you delete it.
+- pass it: expiring (states). Each entry drops itself when the time is up.
 
-`--ttl` is always a Nushell duration like `5min` — the cross.stream store
-converts it to its native form for you, so you never write backend-specific
-strings. States are created with `--ttl $STATE_TTL`, so the CSRF policy and the
-store's expiry are the same number.
+`--ttl` is always a Nushell duration like `5min`; the cross.stream store
+converts it for you. States use `--ttl $STATE_TTL`, so the CSRF policy and the
+store expiry are one number.
 
 ## Security
 
