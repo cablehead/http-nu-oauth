@@ -21,6 +21,7 @@ def main [] {
   test-allowlist
   test-jwt-alg-none
   test-store-contract
+  test-handlers
 }
 
 def test-exports [] {
@@ -422,6 +423,26 @@ def test-store-contract [] {
     error make {msg: "store contract suite (file + xs) failed"}
   }
   print "ok store-contract"
+}
+
+# ============================================================================
+# Handler responses: drive each handler under the real http-nu runtime and
+# assert its returned http.response metadata (status/Location/Set-Cookie). This
+# closes the serving-path gap: handlers must emit responses in tail position,
+# which the pure-nu tests above never exercise. See test-handlers.nu.
+# ============================================================================
+
+def test-handlers [] {
+  let store_dir = mktemp -d
+  let result = (^http-nu eval --store $store_dir test-handlers.nu | complete)
+  rm -rf $store_dir
+
+  if ($result.stdout | is-not-empty) { print ($result.stdout | str trim) }
+  if $result.exit_code != 0 {
+    print ($result.stderr)
+    error make {msg: "handler response suite failed"}
+  }
+  print "ok handlers"
 }
 
 def assert [condition: bool, message: string] {

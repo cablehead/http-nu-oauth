@@ -73,50 +73,48 @@ def render-user-info [auth: record] {
   </html>"
 }
 
+# Each match arm's final expression is the response. Do NOT wrap responses in
+# `return`: http-nu reads status/headers from pipeline metadata, which does not
+# survive `return` (see lib.nu respond). Responses must stay in tail position.
 {|req|
   match $req {
     {method: "GET" , path: "/auth/logout"} => {
       let config = $env.OAUTH_CONFIG | from json
       let first_provider = $config.providers | columns | first
       let client = load-client $first_provider
-      return (handle-logout $client $req)
+      handle-logout $client $req
     }
 
     {method: "GET" , path: $path} if ($path | str starts-with "/auth/login/") => {
       let provider_name = $path | str replace "/auth/login/" ""
       let client = load-client $provider_name
       let provider = providers all | get $provider_name
-      return (handle-oauth $provider $client "/")
+      handle-oauth $provider $client "/"
     }
 
     {method: "GET" , path: "/auth/callback"} => {
-      # Get provider name from the challenge cookie
+      # Get provider name from the challenge cookie.
       let cookies = $req.headers | get cookie? | parse-cookies
       let challenge_key = $cookies | get -o oauth_challenge
-
-      if ($challenge_key | is-empty) {
-        .response {status: 400}
-        return "Error: Missing challenge cookie"
-      }
-
-      # Load the challenge to get the provider name
       let temp_client = {
         challenges: (make-file-store "challenges" --ttl $CHALLENGE_TTL)
       }
-
-      let challenge_data = do $temp_client.challenges.get $challenge_key
-      if ($challenge_data | is-empty) {
-        .response {status: 400}
-        return "Error: Invalid or expired challenge"
+      let challenge_data = if ($challenge_key | is-empty) {
+        null
+      } else {
+        do $temp_client.challenges.get $challenge_key
       }
 
-      let stored_challenge = $challenge_data | from json
-      let provider_name = $stored_challenge.provider_name
-
-      # Now load proper client and provider
-      let client = load-client $provider_name
-      let provider = providers all | get $provider_name
-      return (handle-oauth-callback $provider $client $req)
+      if ($challenge_key | is-empty) {
+        respond {status: 400, body: "Error: Missing challenge cookie"}
+      } else if ($challenge_data | is-empty) {
+        respond {status: 400, body: "Error: Invalid or expired challenge"}
+      } else {
+        let provider_name = ($challenge_data | from json | get provider_name)
+        let client = load-client $provider_name
+        let provider = providers all | get $provider_name
+        handle-oauth-callback $provider $client $req
+      }
     }
 
     {method: "GET" , path: "/"} => {
@@ -126,9 +124,9 @@ def render-user-info [auth: record] {
 
       let auth = get-auth $client $req (providers all)
       if ($auth | is-empty) {
-        return (render-provider-list)
+        render-provider-list
       } else {
-        return (render-user-info $auth)
+        render-user-info $auth
       }
     }
   }

@@ -122,6 +122,28 @@ export def clear-cookie [
 }
 
 # ============================================================================
+# HTTP response
+# ============================================================================
+
+# Turn a plain result record into an http-nu response. http-nu reads status and
+# headers from the returned pipeline value's `http.response` metadata (there is
+# no `.response` command).
+#
+# CRITICAL: pipeline metadata does NOT survive `return` or `let` (nushell
+# collects the value and drops it), so `respond` MUST be called in tail
+# position of the handler. Handlers therefore compute a plain result record
+# (which survives `return`) and hand it to `respond` as their final expression.
+#
+# result: { status?: int, headers?: record, body?: string }. Header values may
+# be a string or a list of strings (a list-valued Set-Cookie becomes one header
+# per cookie).
+export def respond [result: record] {
+  let body = ($result | get -o body | default "")
+  let http = ($result | reject -o body)
+  $body | metadata set { merge {'http.response': $http} }
+}
+
+# ============================================================================
 # Storage interface
 # ============================================================================
 #
@@ -400,7 +422,7 @@ export def handle-oauth [
   # The challenge token travels out as the OAuth `state` parameter.
   let auth_url = get-auth-url $provider $client $challenge.token
 
-  .response {
+  respond {
     status: 302
     headers: {
       Location: $auth_url
@@ -409,8 +431,20 @@ export def handle-oauth [
   }
 }
 
-# Handle OAuth callback
+# Handle OAuth callback. Computes the result record, then emits it in tail
+# position (see respond: metadata does not survive `return`).
 export def handle-oauth-callback [
+  provider: record
+  client: record
+  req: record
+] {
+  respond (oauth-callback-result $provider $client $req)
+}
+
+# Produce the callback's response record: { status, body?, headers? }.
+# Uses early `return` freely because plain records survive it; only the outer
+# handler's tail `respond` attaches metadata.
+def oauth-callback-result [
   provider: record
   client: record
   req: record
@@ -420,15 +454,13 @@ export def handle-oauth-callback [
   let challenge_key = $cookies | get -o oauth_challenge
 
   if ($challenge_key | is-empty) {
-    .response {status: 400}
-    return "Error: Missing challenge cookie"
+    return {status: 400, body: "Error: Missing challenge cookie"}
   }
 
   let stored_raw = do $client.challenges.get $challenge_key
   if ($stored_raw | is-empty) {
     # Unknown, expired (TTL swept), or already-used challenge.
-    .response {status: 400}
-    return "Error: Invalid or expired challenge"
+    return {status: 400, body: "Error: Invalid or expired challenge"}
   }
 
   let stored_challenge = $stored_raw | from json
@@ -444,22 +476,19 @@ export def handle-oauth-callback [
   do $client.challenges.delete $challenge_key
 
   if ($valid | is-empty) {
-    .response {status: 400}
-    return "Error: Invalid or expired challenge (CSRF check failed)"
+    return {status: 400, body: "Error: Invalid or expired challenge (CSRF check failed)"}
   }
 
   # Validate code
   if ($req.query | get -o code | is-empty) {
-    .response {status: 400}
-    return "Error: No auth code provided"
+    return {status: 400, body: "Error: No auth code provided"}
   }
 
   # Exchange code for token
   let token_resp = do $provider.token-exchange $client $req.query.code
 
   if $token_resp.status >= 399 {
-    .response {status: 400}
-    return $"Error: Failed to get token (($token_resp.status))"
+    return {status: 400, body: $"Error: Failed to get token (($token_resp.status))"}
   }
 
   # Get user info
@@ -468,8 +497,7 @@ export def handle-oauth-callback [
   let user_resp = do $provider.get-user $user_token
 
   if $user_resp.status >= 399 {
-    .response {status: 400}
-    return "Error: Failed to fetch user info"
+    return {status: 400, body: "Error: Failed to fetch user info"}
   }
 
   # Store session. csrf_token gates state-changing actions like logout.
@@ -485,7 +513,7 @@ export def handle-oauth-callback [
   let set_session = set-cookie $client.redirect "session" $session_hash
   let clear_challenge = clear-cookie $client.redirect "oauth_challenge"
 
-  .response {
+  {
     status: 302
     headers: {
       Location: (safe-return-to $stored_challenge.return_to)
@@ -517,25 +545,25 @@ export def handle-logout [client: record, req: record] {
   }
   let provided_csrf = $req | get -o query | default {} | get -o csrf
 
-  # Reject state-changing GET without a valid CSRF token.
+  # Reject state-changing GET without a valid CSRF token. respond is in tail
+  # position of each branch (metadata does not survive `return`).
   if not (logout-authorized $session $provided_csrf) {
-    .response {status: 403}
-    return "Error: Invalid CSRF token"
-  }
+    respond {status: 403, body: "Error: Invalid CSRF token"}
+  } else {
+    if ($session_hash | is-not-empty) {
+      do $client.sessions.delete $session_hash
+    }
 
-  if ($session_hash | is-not-empty) {
-    do $client.sessions.delete $session_hash
-  }
+    # Clear both session and challenge cookies (list = multiple Set-Cookie).
+    let clear_session = clear-cookie $client.redirect "session"
+    let clear_challenge = clear-cookie $client.redirect "oauth_challenge"
 
-  # Clear both session and challenge cookies (list syntax = multiple Set-Cookie).
-  let clear_session = clear-cookie $client.redirect "session"
-  let clear_challenge = clear-cookie $client.redirect "oauth_challenge"
-
-  .response {
-    status: 302
-    headers: {
-      Location: "/"
-      "Set-Cookie": [$clear_session $clear_challenge]
+    respond {
+      status: 302
+      headers: {
+        Location: "/"
+        "Set-Cookie": [$clear_session $clear_challenge]
+      }
     }
   }
 }
