@@ -11,13 +11,18 @@ def and-then [next: closure --else: closure] {
 }
 
 # ============================================================================
-# CSRF State Management
+# CSRF Challenge Management
+#
+# A "challenge" is a short-lived, single-use record we create before redirecting
+# to the provider and verify when the provider redirects back. Its token rides
+# the OAuth `state` query parameter out and back — so "challenge" is our
+# app-side concept, "state" is only the wire parameter that carries the token.
 # ============================================================================
 
-# Generate random state token using UUIDv4
-export def generate-state [return_to: string, provider_name: string] {
+# Generate a random challenge token using UUIDv4.
+export def generate-challenge [return_to: string, provider_name: string] {
   let token = random uuid
-  let state_data = {
+  let challenge_data = {
     token: $token
     return_to: $return_to
     provider_name: $provider_name
@@ -25,7 +30,7 @@ export def generate-state [return_to: string, provider_name: string] {
   }
   {
     token: $token
-    data: $state_data
+    data: $challenge_data
   }
 }
 
@@ -41,29 +46,29 @@ export def safe-return-to [return_to: any] {
   $return_to
 }
 
-# Lifetime of a CSRF state token. We (the relying party) mint the state, so its
-# lifetime is our policy — there is nothing authoritative in the token to derive
-# it from. This is distinct from session lifetime, which is driven by the
+# Lifetime of a CSRF challenge. We (the relying party) mint the challenge, so
+# its lifetime is our policy: there is nothing authoritative in the token to
+# derive it from. This is distinct from session lifetime, which is driven by the
 # provider's `expires_in` (see get-auth). Override per-call via `--ttl`.
-export const STATE_TTL = 5min
+export const CHALLENGE_TTL = 5min
 
-# Validate state token matches stored state.
-# state_token is `any` because it comes straight from a query param and may be
-# null (missing); a null/mismatched token simply fails to match.
-export def validate-state [state_token: any, stored_states: list, --ttl: duration] {
-  let limit = ($ttl | default $STATE_TTL)
+# Validate a presented token against the stored challenges.
+# The token is `any` because it comes straight from the OAuth `state` query
+# param and may be null (missing); a null/mismatched token simply fails to match.
+export def validate-challenge [token: any, stored_challenges: list, --ttl: duration] {
+  let limit = ($ttl | default $CHALLENGE_TTL)
 
-  if ($state_token | is-empty) {
+  if ($token | is-empty) {
     return null
   }
 
-  let match = $stored_states | where token == $state_token | first
+  let match = $stored_challenges | where token == $token | first
 
   if ($match | is-empty) {
     return null
   }
 
-  # Reject states older than the policy TTL.
+  # Reject challenges older than the policy TTL.
   let created = $match.created_at | into datetime
   let now = date now
 
@@ -143,16 +148,16 @@ export def clear-cookie [
 #     absent, malformed, or expired. set returns the new key (string). update
 #     and delete return nothing.
 #   - ERROR BEHAVIOR: get/update/delete on an absent or malformed key never
-#     throw — get yields null, update/delete are no-ops.
+#     throw; get yields null, update/delete are no-ops.
 #   - TTL: a store MAY be created with a TTL for ephemeral entries (CSRF
-#     states). Entries past their TTL read as null; how they are reclaimed is
-#     the implementation's concern (file: mtime sweep; xs: native frame TTL).
+#     challenges). Entries past their TTL read as null; how they are reclaimed
+#     is the implementation's concern (file: mtime sweep; xs: native frame TTL).
 #
 # Two implementations follow: make-file-store (file-backed) and make-xs-store
 # (cross.stream-backed). Both satisfy this contract and are exercised by the
 # same table-driven suite in test-contract.nu. Both take an optional --ttl
 # (a nushell duration): omit it for a PERSISTENT store (sessions), pass it for
-# an EXPIRING store (states).
+# an EXPIRING store (challenges).
 
 # Store keys are 64-char lowercase-hex tokens (a SHA256 digest for the file
 # store, random bytes for the xs store). Validating this shape at the boundary
@@ -165,7 +170,7 @@ export def valid-store-key [] {
 }
 
 # Remove every file under $path whose mtime is older than $ttl. Used to bound
-# disk for an expiring store (states) so an attacker cannot flood it.
+# disk for an expiring store (challenges) so an attacker cannot flood it.
 def sweep-expired [path: string, ttl: duration] {
   let now = date now
   ls $path | where type == file | where { |r| ($now - $r.modified) > $ttl } | each { |r|
@@ -178,7 +183,7 @@ def sweep-expired [path: string, ttl: duration] {
 #
 # Persistent by default. Pass --ttl to make it EXPIRING: reads lazily expire
 # stale files and every write sweeps expired files, so the directory stays
-# bounded (sessions omit --ttl; states pass one).
+# bounded (sessions omit --ttl; challenges pass one).
 export def make-file-store [path: string, --ttl: duration] {
   mkdir $path
   {
@@ -232,7 +237,7 @@ def new-store-key [] {
 
 # Create a cross.stream (xs) key-value store.
 #
-# Requires the xs store commands (.append/.last/.cas/.cat/.remove) — i.e. run
+# Requires the xs store commands (.append/.last/.cas/.cat/.remove), i.e. run
 # under `http-nu --store <dir>` (or `http-nu eval --store <dir>` in tests).
 #
 # Each logical entry is its own topic `<base>.<key>`, and the entry's value is
@@ -242,8 +247,8 @@ def new-store-key [] {
 #   - PERSISTENT (no --ttl): append with `last:1`, so only the current value is
 #     retained (superseded versions are pruned by the store), kept indefinitely.
 #   - EXPIRING (--ttl): append with a native frame ttl (`time:<ms>`), so entries
-#     (states) expire on their own — no manual sweep.
-# `base` must be a valid topic segment (e.g. "session", "state").
+#     (challenges) expire on their own, no manual sweep.
+# `base` must be a valid topic segment (e.g. "session", "challenge").
 export def make-xs-store [base: string, --ttl: duration] {
   # Translate the duration to xs's native frame-ttl form; persistent stores keep
   # only the latest value per key.
@@ -372,7 +377,8 @@ export def get-auth [client req providers: record] {
   $session
 }
 
-# Build authorization URL
+# Build authorization URL. `state` is the OAuth wire parameter value (the
+# challenge token) the provider echoes back on callback.
 export def get-auth-url [
   provider: record
   client: record
@@ -387,18 +393,18 @@ export def handle-oauth [
   client: record
   return_to: string
 ] {
-  # Generate CSRF state
-  let state_info = generate-state $return_to $client.provider_name
-  let state_hash = $state_info.data | to json -r | do $client.states.set
+  # Mint a CSRF challenge and store it under an opaque key.
+  let challenge = generate-challenge $return_to $client.provider_name
+  let challenge_key = $challenge.data | to json -r | do $client.challenges.set
 
-  # Build auth URL with state token
-  let auth_url = get-auth-url $provider $client $state_info.token
+  # The challenge token travels out as the OAuth `state` parameter.
+  let auth_url = get-auth-url $provider $client $challenge.token
 
   .response {
     status: 302
     headers: {
       Location: $auth_url
-      "Set-Cookie": (set-cookie $client.redirect "oauth_state" $state_hash)
+      "Set-Cookie": (set-cookie $client.redirect "oauth_challenge" $challenge_key)
     }
   }
 }
@@ -409,36 +415,37 @@ export def handle-oauth-callback [
   client: record
   req: record
 ] {
-  # Validate state (CSRF protection)
+  # Verify the CSRF challenge.
   let cookies = $req.headers | get cookie? | parse-cookies
-  let state_hash = $cookies | get -o oauth_state
+  let challenge_key = $cookies | get -o oauth_challenge
 
-  if ($state_hash | is-empty) {
+  if ($challenge_key | is-empty) {
     .response {status: 400}
-    return "Error: Missing state cookie"
+    return "Error: Missing challenge cookie"
   }
 
-  let stored_raw = do $client.states.get $state_hash
+  let stored_raw = do $client.challenges.get $challenge_key
   if ($stored_raw | is-empty) {
-    # Unknown, expired (TTL swept), or already-used state.
+    # Unknown, expired (TTL swept), or already-used challenge.
     .response {status: 400}
-    return "Error: Invalid or expired state"
+    return "Error: Invalid or expired challenge"
   }
 
-  let stored_state = $stored_raw | from json
-  let state_token = $req.query | get -o state
+  let stored_challenge = $stored_raw | from json
+  # The token the provider echoed back via the OAuth `state` parameter.
+  let presented_token = $req.query | get -o state
 
-  # Validate token match + 5-minute TTL (single use is enforced by the delete
-  # below, which runs whether or not validation passes).
-  let valid = validate-state $state_token [$stored_state]
+  # Validate token match + TTL (single use is enforced by the delete below,
+  # which runs whether or not validation passes).
+  let valid = validate-challenge $presented_token [$stored_challenge]
 
-  # Consume the state before deciding: one-time use, and an expired state must
-  # not linger.
-  do $client.states.delete $state_hash
+  # Consume the challenge before deciding: one-time use, and an expired
+  # challenge must not linger.
+  do $client.challenges.delete $challenge_key
 
   if ($valid | is-empty) {
     .response {status: 400}
-    return "Error: Invalid or expired state (CSRF check failed)"
+    return "Error: Invalid or expired challenge (CSRF check failed)"
   }
 
   # Validate code
@@ -469,20 +476,20 @@ export def handle-oauth-callback [
   let session_data = $token_resp.body
   | insert token_issued_at (date now)
   | insert user $user_resp.body
-  | insert provider $stored_state.provider_name
+  | insert provider $stored_challenge.provider_name
   | insert csrf_token (random uuid)
 
   let session_hash = $session_data | to json -r | do $client.sessions.set
 
-  # Set session cookie and clear oauth_state cookie
+  # Set session cookie and clear the challenge cookie.
   let set_session = set-cookie $client.redirect "session" $session_hash
-  let clear_state = clear-cookie $client.redirect "oauth_state"
+  let clear_challenge = clear-cookie $client.redirect "oauth_challenge"
 
   .response {
     status: 302
     headers: {
-      Location: (safe-return-to $stored_state.return_to)
-      "Set-Cookie": [$set_session $clear_state]
+      Location: (safe-return-to $stored_challenge.return_to)
+      "Set-Cookie": [$set_session $clear_challenge]
     }
   }
 }
@@ -520,15 +527,15 @@ export def handle-logout [client: record, req: record] {
     do $client.sessions.delete $session_hash
   }
 
-  # Clear both session and state cookies using list syntax for multiple Set-Cookie headers
+  # Clear both session and challenge cookies (list syntax = multiple Set-Cookie).
   let clear_session = clear-cookie $client.redirect "session"
-  let clear_state = clear-cookie $client.redirect "oauth_state"
+  let clear_challenge = clear-cookie $client.redirect "oauth_challenge"
 
   .response {
     status: 302
     headers: {
       Location: "/"
-      "Set-Cookie": [$clear_session $clear_state]
+      "Set-Cookie": [$clear_session $clear_challenge]
     }
   }
 }

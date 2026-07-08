@@ -14,7 +14,7 @@ def main [] {
   test-store-key-validation
   test-traversal-delete
   test-traversal-auth-bypass
-  test-validate-state
+  test-validate-challenge
   test-store-ttl
   test-safe-return-to
   test-logout-csrf
@@ -26,7 +26,7 @@ def main [] {
 def test-exports [] {
   # lib.nu exports
   let _ = (make-file-store "test-tmp" | describe)
-  let _ = (generate-state "/" "test" | describe)
+  let _ = (generate-challenge "/" "test" | describe)
   let _ = (parse-cookies | describe)
 
   # providers
@@ -120,8 +120,8 @@ def test-session-expiry [] {
   print "ok session-expiry"
 }
 
-# Provider session TTL is enforced by get-auth (distinct from the state TTL,
-# which is our policy). A session past token_issued_at + expires_in with no
+# Provider session TTL is enforced by get-auth (distinct from the challenge
+# TTL, which is our policy). A session past token_issued_at + expires_in with no
 # usable refresh_token must be rejected AND evicted.
 def test-session-expiry-enforced [] {
   let sandbox = mktemp -d
@@ -147,59 +147,59 @@ def test-session-expiry-enforced [] {
 }
 
 # ============================================================================
-# State expiry (HIGH): advertised 5-minute TTL + single use must be enforced,
-# and the states dir must not grow without bound.
+# Challenge expiry (HIGH): advertised 5-minute TTL + single use must be
+# enforced, and the challenges dir must not grow without bound.
 # ============================================================================
 
 def fmt-ts [dt: datetime] {
   $dt | format date "%Y-%m-%dT%H:%M:%S%.3fZ"
 }
 
-def test-validate-state [] {
+def test-validate-challenge [] {
   let fresh = {token: "tok-abc", return_to: "/", provider_name: "discord", created_at: (fmt-ts (date now))}
 
-  # Matching token, within TTL -> returns the state.
-  let ok = validate-state "tok-abc" [$fresh]
-  assert ($ok != null) "fresh matching state must validate"
-  assert ($ok.token == "tok-abc") "validated state must be returned"
+  # Matching token, within TTL -> returns the challenge.
+  let ok = validate-challenge "tok-abc" [$fresh]
+  assert ($ok != null) "fresh matching challenge must validate"
+  assert ($ok.token == "tok-abc") "validated challenge must be returned"
 
   # Wrong token -> null.
-  assert ((validate-state "tok-wrong" [$fresh]) == null) "token mismatch must fail"
+  assert ((validate-challenge "tok-wrong" [$fresh]) == null) "token mismatch must fail"
 
   # Missing token -> null (no throw).
-  assert ((validate-state null [$fresh]) == null) "null token must fail"
+  assert ((validate-challenge null [$fresh]) == null) "null token must fail"
 
   # Expired (created 6 minutes ago) -> null even with the right token.
   let stale = {token: "tok-old", return_to: "/", provider_name: "discord", created_at: (fmt-ts ((date now) - 6min))}
-  assert ((validate-state "tok-old" [$stale]) == null) "expired state must fail TTL"
+  assert ((validate-challenge "tok-old" [$stale]) == null) "expired challenge must fail TTL"
 
-  # TTL is our policy: STATE_TTL is the default, overridable per call.
-  assert ($STATE_TTL == 5min) "STATE_TTL default is 5min"
-  # A 2-minute-old state passes the default but fails a tighter --ttl.
+  # TTL is our policy: CHALLENGE_TTL is the default, overridable per call.
+  assert ($CHALLENGE_TTL == 5min) "CHALLENGE_TTL default is 5min"
+  # A 2-minute-old challenge passes the default but fails a tighter --ttl.
   let twomin = {token: "t2", return_to: "/", provider_name: "discord", created_at: (fmt-ts ((date now) - 2min))}
-  assert ((validate-state "t2" [$twomin]) != null) "2m state ok under default TTL"
-  assert ((validate-state "t2" [$twomin] --ttl 1min) == null) "2m state fails under 1min TTL"
+  assert ((validate-challenge "t2" [$twomin]) != null) "2m challenge ok under default TTL"
+  assert ((validate-challenge "t2" [$twomin] --ttl 1min) == null) "2m challenge fails under 1min TTL"
 
-  print "ok validate-state"
+  print "ok validate-challenge"
 }
 
 def test-store-ttl [] {
   let sandbox = mktemp -d
 
   # TTL store: lazy expiry on get.
-  let ttl_store = make-file-store ($sandbox | path join "states") --ttl 5min
+  let ttl_store = make-file-store ($sandbox | path join "challenges") --ttl 5min
   let k = '{"s": 1}' | do $ttl_store.set
   assert ((do $ttl_store.get $k) == '{"s": 1}') "fresh ttl entry must read back"
 
   # Age the file past the TTL -> get returns null and removes it.
-  ^touch -d "2000-01-01" ($sandbox | path join "states" | path join $k)
+  ^touch -d "2000-01-01" ($sandbox | path join "challenges" | path join $k)
   assert ((do $ttl_store.get $k) == null) "expired entry must read as null"
-  assert (not (($sandbox | path join "states" | path join $k) | path exists)) "expired entry must be removed on get"
+  assert (not (($sandbox | path join "challenges" | path join $k) | path exists)) "expired entry must be removed on get"
 
   # sweep() bounds the dir: age one entry, keep one fresh, sweep, only fresh survives.
   let old = '{"old": 1}' | do $ttl_store.set
   let new = '{"new": 1}' | do $ttl_store.set
-  ^touch -d "2000-01-01" ($sandbox | path join "states" | path join $old)
+  ^touch -d "2000-01-01" ($sandbox | path join "challenges" | path join $old)
   do $ttl_store.sweep
   assert ((do $ttl_store.get $old) == null) "swept entry must be gone"
   assert ((do $ttl_store.get $new) == '{"new": 1}') "fresh entry must survive sweep"

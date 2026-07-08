@@ -12,7 +12,7 @@ def load-client [provider_name: string] {
     redirect: $config.redirect_uri
     scopes: $provider_config.scopes
     sessions: (make-file-store "sessions")
-    states: (make-file-store "states" --ttl $STATE_TTL)
+    challenges: (make-file-store "challenges" --ttl $CHALLENGE_TTL)
   }
 }
 
@@ -90,28 +90,28 @@ def render-user-info [auth: record] {
     }
 
     {method: "GET" , path: "/auth/callback"} => {
-      # Get provider name from state cookie
+      # Get provider name from the challenge cookie
       let cookies = $req.headers | get cookie? | parse-cookies
-      let state_hash = $cookies | get -o oauth_state
+      let challenge_key = $cookies | get -o oauth_challenge
 
-      if ($state_hash | is-empty) {
+      if ($challenge_key | is-empty) {
         .response {status: 400}
-        return "Error: Missing state cookie"
+        return "Error: Missing challenge cookie"
       }
 
-      # Load state to get provider name
+      # Load the challenge to get the provider name
       let temp_client = {
-        states: (make-file-store "states" --ttl $STATE_TTL)
+        challenges: (make-file-store "challenges" --ttl $CHALLENGE_TTL)
       }
 
-      let state_data = do $temp_client.states.get $state_hash
-      if ($state_data | is-empty) {
+      let challenge_data = do $temp_client.challenges.get $challenge_key
+      if ($challenge_data | is-empty) {
         .response {status: 400}
-        return "Error: Invalid or expired state"
+        return "Error: Invalid or expired challenge"
       }
 
-      let stored_state = $state_data | from json
-      let provider_name = $stored_state.provider_name
+      let stored_challenge = $challenge_data | from json
+      let provider_name = $stored_challenge.provider_name
 
       # Now load proper client and provider
       let client = load-client $provider_name

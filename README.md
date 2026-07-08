@@ -26,8 +26,9 @@ browser   any request (carries cookie)   -> get-auth              -> {user, prov
 - **Sessions** are long-lived. On login the library stores the session and sets
   an opaque cookie; `get-auth` turns that cookie back into the user on every
   request.
-- **States** are single-use CSRF tokens that protect the redirect round-trip.
-  They expire on their own.
+- **Challenges** are single-use CSRF tokens that protect the redirect
+  round-trip. They expire on their own. (The token rides the OAuth `state`
+  parameter on the wire.)
 - Both live in a pluggable **store**: file-backed out of the box, or
   [cross.stream](https://cross.stream). Same interface either way.
 - An **allowlist** keyed on the provider's immutable user ID decides who can do
@@ -51,7 +52,7 @@ getting Discord/Google credentials. Redirect URI is
 ## Using it in your app
 
 Your http-nu script is one request-handling closure. Build a **client** record
-(credentials plus a session store and a state store), then route the auth
+(credentials plus a session store and a challenge store), then route the auth
 endpoints to the handlers and gate what you like with `is-allowed`:
 
 ```nushell
@@ -69,7 +70,7 @@ def client [provider_name: string] {
     redirect: "http://localhost:8080/auth/callback"
     scopes: ["identify"]
     sessions: (make-file-store "sessions")                 # persistent
-    states:   (make-file-store "states" --ttl $STATE_TTL)  # expiring
+    challenges: (make-file-store "challenges" --ttl $CHALLENGE_TTL)  # expiring
   }
 }
 
@@ -83,7 +84,7 @@ def client [provider_name: string] {
 
     # 2. Provider redirects back with ?code and ?state: set the session cookie
     {method: "GET", path: "/auth/callback"} => {
-      # (the example reads the provider name back out of the state cookie)
+      # (the example reads the provider name back out of the challenge cookie)
       handle-oauth-callback (providers all | get discord) (client "discord") $req
     }
 
@@ -115,7 +116,7 @@ def client [provider_name: string] {
 | Function | Purpose |
 | -------- | ------- |
 | `handle-oauth <provider> <client> <return_to>` | Start the flow; 302 to the provider |
-| `handle-oauth-callback <provider> <client> <req>` | Validate state, exchange code, set session cookie, redirect to `return_to` |
+| `handle-oauth-callback <provider> <client> <req>` | Verify the challenge, exchange code, set session cookie, redirect to `return_to` |
 | `handle-logout <client> <req>` | Clear the session (requires a valid `?csrf=` token) |
 | `get-auth <client> <req> <providers>` | Resolve the cookie to `{user, provider, ...}`, or `null` |
 
@@ -127,12 +128,12 @@ def client [provider_name: string] {
 | `account-id <provider> <user>` | The immutable ID to key on (Discord `id`; Google `sub`, only if `email_verified`), or `null` |
 | `safe-return-to <path>` | Clamp a post-login redirect to a same-origin path |
 
-**CSRF state**
+**CSRF challenge**
 
 | Function | Purpose |
 | -------- | ------- |
-| `generate-state <return_to> <provider_name>` | Mint a state token and its stored data |
-| `validate-state <token> <states> [--ttl]` | Check match, single-use, and TTL |
+| `generate-challenge <return_to> <provider_name>` | Mint a challenge token and its stored data |
+| `validate-challenge <token> <challenges> [--ttl]` | Check match, single-use, and TTL |
 
 **Stores**: `make-file-store`, `make-xs-store` (see [Storage interface](#storage-interface)).
 
@@ -203,24 +204,24 @@ Both satisfy the same contract and are checked by the same table-driven suite
 | Clock | Set by |
 | ----- | ------ |
 | Session | the token's `expires_in`. `get-auth` refreshes or evicts. |
-| State (CSRF) | `STATE_TTL`, default `5min`. |
+| Challenge (CSRF) | `CHALLENGE_TTL`, default `5min`. |
 
 Stores take one flag, `--ttl <duration>`:
 
 - omit it: persistent (sessions), kept until you delete it.
-- pass it: expiring (states), each entry drops itself when the time is up.
+- pass it: expiring (challenges), each entry drops itself when the time is up.
 
 `--ttl` is always a Nushell duration like `5min`; the cross.stream store
-converts it for you. States use `--ttl $STATE_TTL`, so the CSRF policy and the
-store expiry are one number.
+converts it for you. Challenges use `--ttl $CHALLENGE_TTL`, so the CSRF policy
+and the store expiry are one number.
 
 ## Security
 
 - **Store key validation**: cookie-supplied keys are validated at the store
   boundary, blocking path traversal (file) and topic injection (xs).
-- **CSRF state**: tokens are random, single-use, and validated on the callback.
-- **Bounded state store**: expired states are reclaimed, so they can't pile up
-  into a disk-exhaustion DoS.
+- **CSRF challenge**: tokens are random, single-use, and validated on the callback.
+- **Bounded challenge store**: expired challenges are reclaimed, so they can't
+  pile up into a disk-exhaustion DoS.
 - **CSRF-protected logout**: `/auth/logout` needs a per-session token, so a
   cross-site request can't force a logout.
 - **Open-redirect protection**: the post-login `return_to` is clamped to a
@@ -237,7 +238,7 @@ store expiry are one number.
 ## Project layout
 
 ```
-lib.nu                 # handlers, stores, state, allowlist
+lib.nu                 # handlers, stores, challenges, allowlist
 providers/
   mod.nu               # registry (providers all)
   discord/mod.nu

@@ -88,7 +88,7 @@ run-suite "file" (
 run-suite "xs" (
   make-xs-store "session"
 ) (
-  make-xs-store "state" --ttl 400ms
+  make-xs-store "challenge" --ttl 400ms
 ) 900ms
 
 print "ok store-contract (file + xs)"
